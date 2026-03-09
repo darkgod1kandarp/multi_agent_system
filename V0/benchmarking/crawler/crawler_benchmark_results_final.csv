@@ -1,0 +1,4 @@
+CrawlerName,success,time,quality,chars,pricing,totalscrape
+Firecrawl,True,1.55,9.0,607720,250GBP,500000
+Crawl4AI,True,3.21,7.6,660416,0GBP,0
+Apify,True,41.45,9.0,481492,nearly(392GBP) depending on page quality,500000
