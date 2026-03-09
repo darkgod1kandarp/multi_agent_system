@@ -1,0 +1,13 @@
+{
+  "name": "bedrock-node",
+  "version": "1.0.0",
+  "description": "Simple AWS Bedrock script in Node.js",
+  "main": "bedrock.js",
+  "scripts": {
+    "start": "node agent_test.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1004.0",
+    "dotenv": "^17.3.1"
+  }
+}
