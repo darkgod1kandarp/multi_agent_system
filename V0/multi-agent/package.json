@@ -1,0 +1,19 @@
+{
+  "name": "multi-agent",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node main.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@mendable/firecrawl-js": "^4.15.4",
+    "@qdrant/js-client-rest": "^1.17.0",
+    "dotenv": "^17.3.1",
+    "uuid": "^13.0.0"
+  }
+}
