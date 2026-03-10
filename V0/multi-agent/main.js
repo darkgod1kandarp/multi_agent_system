@@ -1,16 +1,18 @@
 const axios = require("axios");
 const { runFireCrawl } = require('./component/firecrawl');  
-const { GenerateEmbedding, CreateCollection, CollectionExists, InsertBulkIntoQdrant} = require('./component/qdrant_db');
+const { GenerateEmbedding, CreateCollection, CollectionExists, InsertBulkIntoQdrant, SearchQdrant} = require('./component/qdrant_db');
 const dotenv = require('dotenv');
 const uuid = require('uuid');
-
+const { llm } = require('./component/llm');
 dotenv.config();
 
 const { SplitIntoChunks } = require('./utils/chunk_creation');
+const { CallLLM } = require('./component/llm');  
+const { DetectIndustry, GenerateAgents } = require('./utils/agent');
 
 
 async function main() {
-    const url = 'https://en.wikipedia.org/wiki/Artificial_intelligence';
+    const url = 'https://vomyra.com/';
     const crawlResult = await runFireCrawl(url);
     console.log('Crawl Result:', crawlResult);
 
@@ -28,7 +30,7 @@ async function main() {
         await new Promise((r) => setTimeout(r, 100));
   }
 
-    let collectionName = 'my_collection_1';
+    let collectionName =  uuid.v4();
 
     const exists = await CollectionExists(collectionName);
     if (!exists) {
@@ -51,21 +53,32 @@ async function main() {
 
     const validPoints = points.filter((point, index) => {
 
-    if (!point.vector || !Array.isArray(point.vector) || point.vector.length === 0) {
-        return false;
-    }
-    return true;
-});
+        if (!point.vector || !Array.isArray(point.vector) || point.vector.length === 0) {
+            return false;
+            }
+            return true;
+        });
 
-    const batchSize = 100;
-    for (let i = 0; i < validPoints.length; i += batchSize) {
-        const batch = validPoints.slice(i, i + batchSize);
-        await InsertBulkIntoQdrant(collectionName, batch);
-        console.log(`Inserted points ${i} to ${i + batch.length} into Qdrant`);
-    }
+        const batchSize = 100;
+        for (let i = 0; i < validPoints.length; i += batchSize) {
+            const batch = validPoints.slice(i, i + batchSize);
+            await InsertBulkIntoQdrant(collectionName, batch);
+            console.log(`Inserted points ${i} to ${i + batch.length} into Qdrant`);
+        }     
+
+        const industryInfo = await DetectIndustry(
+            async (query, topK) => await SearchQdrant(collectionName, query, topK),
+            CallLLM
+        );  
+
+        console.log("\nFinal Industry Detection Result:", industryInfo);
+
+        const agents = await GenerateAgents(industryInfo, CallLLM);
+        console.log("\nGenerated Agents:", agents);
+
 }
 
 main()
     .then(() => console.log('Done'))
-    .catch(error => console.error('Error in main:', error));
+        .catch(error => console.error('Error in main:', error));
 

@@ -9,11 +9,20 @@ async function runFireCrawl(url) {
     console.log('Using FireCrawl API Key:', FIRECRAWL_API_KEY)
     try {
         const firecrawl = new Firecrawl({ apiKey: FIRECRAWL_API_KEY });
-        const scrapeResponse = await firecrawl.scrape(url, {
-                    formats: ['markdown', 'html'],
+        const crawlResponse = await firecrawl.crawl(url, {
+                limit    : 5,
+                maxDepth : 3,
+                scrapeOptions: {
+                    formats: ["markdown", "html"],
+                },
             });
 
-        return { success: true, content: scrapeResponse.markdown };
+        const allContent = crawlResponse.data
+            .map(page => page.markdown)
+            .filter(Boolean)
+            .join("\n\n---\n\n");
+
+        return { success: true, content: allContent };
     } catch (error) {
         console.error('Error running FireCrawl:', error);
         throw error;

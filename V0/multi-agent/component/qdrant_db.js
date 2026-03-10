@@ -11,6 +11,20 @@ const client = new QdrantClient({
 });
 
 
+async function SearchQdrant(collectionName, query, topK = 5) {
+    const queryVector = await GenerateEmbedding(query);
+    if (!queryVector) {
+        console.error('Failed to generate embedding for query');
+        return [];
+    }
+    const results = await client.search(collectionName, {
+        vector      : queryVector,
+        limit       : topK,
+        with_payload: true,
+    });
+    return results.map(r => r.payload?.text || "").filter(Boolean);
+}
+
 async function CreateCollection(collectionName) {
     try {
         await client.createCollection(collectionName, {
@@ -78,4 +92,20 @@ async function InsertBulkIntoQdrant(collectionName, points) {
     }
 }
 
-module.exports = { CreateCollection, GenerateEmbedding, CollectionExists, InsertBulkIntoQdrant };
+async function SearchQdrant(collectionName, query, topK = 5) {
+    const queryVector = await GenerateEmbedding(query);
+    if (!queryVector) {
+        console.error('Failed to generate embedding for query');
+        return [];
+    }
+
+    const results = await client.search(collectionName, {
+        vector      : queryVector,
+        limit       : topK,
+        with_payload: true,
+    });
+
+    return results.map(r => r.payload?.text || "").filter(Boolean);
+}
+
+module.exports = { CreateCollection, GenerateEmbedding, CollectionExists, InsertBulkIntoQdrant, SearchQdrant };
