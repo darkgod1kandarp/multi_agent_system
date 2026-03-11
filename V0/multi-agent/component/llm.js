@@ -7,7 +7,7 @@ const BEDROCK_API_KEY = process.env.BEDROCK_API_KEY;
 const BEDROCK_MODEL = 'openai.gpt-oss-120b-1:0';
 const BEDROCK_ENDPOINT = process.env.BEDROCK_ENDPOINT || `https://bedrock-runtime.us-east-1.amazonaws.com/model/${BEDROCK_MODEL}/invoke`;
 
-async function CallLLM(systemPrompt, userMessage, maxTokens = 2000) {
+async function CallLLM(systemPrompt, userMessage = ".", maxTokens = 2000) {
 
     console.log("Calling LLM with system prompt:", BEDROCK_ENDPOINT);
     try {
@@ -30,6 +30,7 @@ async function CallLLM(systemPrompt, userMessage, maxTokens = 2000) {
         }
     );
 
+        console.log("LLM response status:", res.status);
         let content = res.data?.choices?.[0]?.message?.content || "";
 
         // Strip <reasoning> tags from GPT-OSS

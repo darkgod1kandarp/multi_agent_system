@@ -1,53 +1,16 @@
-
+const { CallLLM } = require('../component/llm');
+const { agentConciusness, detectIndustryPrompt, generateAgentsSystemPrompt, generateAgentsUserPrompt, createNewAgentPrompt, updateAgentPrompt } = require('./prompt');
 
 async function DetectIndustry(searchQdrant, callLLM) {
-    console.log("\n🔍 Step 1: Detecting industry from Qdrant data...");
+    console.log("\n Step 1: Detecting industry from Qdrant data...");
 
     // Fetch a broad sample from Qdrant
     const samples = await searchQdrant("company business products services overview about us", 10);
     const context = samples.join("\n\n").slice(0, 4000);
 
-    const response = await callLLM(
-        `You are an expert business analyst and AI automation architect.
-
-Analyze the provided business content and detect the industry and business type.
-
-Then design AI agents that can be built using a voice AI platform like Vomyra.
-
-The suggested agents must focus on capabilities such as:
-- handling inbound and outbound phone calls
-- answering customer questions
-- capturing leads
-- scheduling appointments
-- processing orders or bookings
-- providing customer support
-- collecting feedback
-- sending follow-ups
-
-Return ONLY a JSON object (no extra text) in this format:
-
-{
-  "industry": "E-commerce",
-  "business_type": "Online retail store selling fashion products",
-  "key_topics": ["products", "shipping", "returns", "discounts"],
-  "suggested_agents": [
-    "Sales Inquiry Agent",
-    "Customer Support Agent",
-    "Order Tracking Agent",
-    "Returns and Refund Agent",
-    "Marketing and Follow-up Agent"
-  ]
-}
-
-Analyze this content and detect the industry:
-
-${context}`
-    );
-
+    const response = await callLLM(detectIndustryPrompt(context));
     try {
-        console.log("LLM Response for Industry Detection:", response);
         const cleaned = response.replace(/```json|```/g, "").trim();
-        console.log("LLM Response for Industry Detection:", cleaned);
         const parsed  = JSON.parse(cleaned);
         console.log(`Industry detected: ${parsed.industry}`);
         console.log(`Business type: ${parsed.business_type}`);
@@ -64,30 +27,42 @@ ${context}`
     }
 }
 
+
+
+async function ChatLLM(user_prompt, maxTokens = 4000) { 
+
+    const response = await CallLLM(agentConciusness, user_prompt, maxTokens);
+    return response;
+ }
+
+
+async function CreateNewAgent(agentInfo, finalisedAgents, callLLM) {
+
+    //User is providing its thought to create new agent first we need to think if it is
+    //  possible to create new agent with the given information and if it is possible then we 
+    // will create new agent with its prompt and add it to the finalised list of agents othewise send 
+    // response to user that we can not create new agent with the given information and also provide reason for it.
+    
+    const response = await callLLM(createNewAgentPrompt(agentInfo, finalisedAgents), ".", 8000);
+    console.log("LLM Response for CreateNewAgent:", response);
+    try {
+        const cleaned = response.replace(/```json|```/g, "").trim();
+        const parsed  = JSON.parse(cleaned);
+        return parsed;
+    }
+    catch (e) {
+        console.error("Could not parse CreateNewAgent JSON:", e.message);
+        return { can_create: false, reason: "Error parsing LLM response" };
+    }
+}
+
+
+
 async function GenerateAgents(industryInfo, callLLM) {
   try {
-    const agentList = industryInfo.suggested_agents.join(", ");
-
     const response = await callLLM(
-        `You are a prompt engineering expert. Generate concise system prompts for AI agents.
-Return ONLY a valid JSON array (no extra text, no markdown, no trailing commas):
-[
-  {
-    "name": "Agent Name",
-    "role": "short role description",
-    "prompt": "System prompt (max 150 words)"
-  }
-]`,
-        `Generate specialized agent prompts for a ${industryInfo.industry} business.
-Business type   : ${industryInfo.business_type}
-Key topics      : ${industryInfo.key_topics.join(", ")}
-Agents to create: ${agentList}
-
-Rules:
-1. Each prompt MUST cover: role, RAG knowledge base access, escalation to Manager, and tone.
-2. Include this exact sentence in every prompt: "You have access to a RAG knowledge base containing the full company website content. Always search it before answering."
-3. Keep each prompt under 150 words so the full JSON fits within the token limit.
-4. Make each agent's tone and focus distinct.`,
+        generateAgentsSystemPrompt,
+        generateAgentsUserPrompt(industryInfo),
         8000
     );
         console.log("LLM Response for Agent Generation:", response);
@@ -101,4 +76,18 @@ Rules:
     }
 }
 
-module.exports = { DetectIndustry, GenerateAgents};
+async function UpdateAgent(agentInfo, otherAgents, callLLM) {
+    
+    console.log(agentInfo)
+    const response = await callLLM(updateAgentPrompt(agentInfo, otherAgents), ".", 4000);
+    console.log("LLM Response for UpdateAgent:", response);
+    try {
+        const cleaned = response.replace(/```json|```/g, "").trim();
+        return JSON.parse(cleaned);
+    } catch (e) {
+        console.error("Could not parse UpdateAgent JSON:", e.message);
+        return { can_update: false, reason: 'Could not parse LLM response. Please try again.', prompt: null, Explanation: null };
+    }
+}
+
+module.exports = { DetectIndustry, GenerateAgents, ChatLLM, CreateNewAgent, UpdateAgent };

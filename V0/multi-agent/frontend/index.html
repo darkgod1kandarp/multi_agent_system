@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-Agent Generator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg        : #0d0f14;
+      --surface   : #161a23;
+      --border    : #252b38;
+      --accent    : #6c63ff;
+      --accent2   : #00d4aa;
+      --text      : #e4e6f0;
+      --muted     : #7a7f95;
+      --success   : #22c55e;
+      --warn      : #f59e0b;
+      --error     : #ef4444;
+      --radius    : 12px;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background : var(--bg);
+      color      : var(--text);
+      min-height : 100vh;
+      padding    : 2rem 1rem;
+    }
+
+    .container { max-width: 860px; margin: 0 auto; }
+
+    /* ── Header ── */
+    header { text-align: center; margin-bottom: 2.5rem; }
+    header h1 {
+      font-size  : 2rem;
+      font-weight: 700;
+      background : linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header p { color: var(--muted); margin-top: .5rem; font-size: .95rem; }
+
+    /* ── Input card ── */
+    .input-card {
+      background  : var(--surface);
+      border      : 1px solid var(--border);
+      border-radius: var(--radius);
+      padding     : 1.5rem;
+      display     : flex;
+      gap         : .75rem;
+      margin-bottom: 2rem;
+    }
+    .input-card input {
+      flex        : 1;
+      background  : var(--bg);
+      border      : 1px solid var(--border);
+      border-radius: 8px;
+      color       : var(--text);
+      padding     : .75rem 1rem;
+      font-size   : .95rem;
+      outline     : none;
+      transition  : border-color .2s;
+    }
+    .input-card input:focus { border-color: var(--accent); }
+    .input-card input::placeholder { color: var(--muted); }
+
+    .btn {
+      background  : var(--accent);
+      color       : #fff;
+      border      : none;
+      border-radius: 8px;
+      padding     : .75rem 1.5rem;
+      font-size   : .95rem;
+      font-weight : 600;
+      cursor      : pointer;
+      transition  : opacity .2s, transform .1s;
+      white-space : nowrap;
+    }
+    .btn:hover:not(:disabled)  { opacity: .85; }
+    .btn:active:not(:disabled) { transform: scale(.97); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+    /* ── Steps ── */
+    .steps {
+      display       : grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap           : .75rem;
+      margin-bottom : 2rem;
+    }
+    .step {
+      background  : var(--surface);
+      border      : 1px solid var(--border);
+      border-radius: var(--radius);
+      padding     : 1rem;
+      text-align  : center;
+      font-size   : .8rem;
+      color       : var(--muted);
+      transition  : border-color .3s, color .3s;
+    }
+    .step .icon { font-size: 1.5rem; display: block; margin-bottom: .35rem; }
+    .step.active { border-color: var(--accent); color: var(--text); }
+    .step.done   { border-color: var(--success); color: var(--success); }
+    .step.error  { border-color: var(--error);   color: var(--error); }
+
+    /* ── Log ── */
+    .log-box {
+      background  : var(--surface);
+      border      : 1px solid var(--border);
+      border-radius: var(--radius);
+      padding     : 1rem 1.25rem;
+      max-height  : 220px;
+      overflow-y  : auto;
+      font-family : 'Consolas', monospace;
+      font-size   : .8rem;
+      color       : var(--muted);
+      margin-bottom: 2rem;
+      display     : none;
+    }
+    .log-box .line { padding: .1rem 0; }
+    .log-box .line.info    { color: var(--text); }
+    .log-box .line.success { color: var(--success); }
+    .log-box .line.error   { color: var(--error); }
+
+    /* ── Industry card ── */
+    .industry-card {
+      background  : var(--surface);
+      border      : 1px solid var(--border);
+      border-radius: var(--radius);
+      padding     : 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+      display     : none;
+    }
+    .industry-card h2 {
+      font-size: 1rem;
+      color    : var(--accent2);
+      margin-bottom: .75rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      font-size: .75rem;
+    }
+    .industry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem 1.5rem; }
+    .field label { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .field p     { font-size: .9rem; margin-top: .15rem; }
+
+    .tags { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .15rem; }
+    .tag {
+      background  : rgba(108,99,255,.15);
+      border      : 1px solid rgba(108,99,255,.3);
+      color       : var(--accent);
+      font-size   : .75rem;
+      padding     : .15rem .55rem;
+      border-radius: 999px;
+    }
+
+    /* ── Agents section ── */
+    #agents-section { display: none; }
+    #agents-section h2 {
+      font-size    : 1.1rem;
+      font-weight  : 600;
+      margin-bottom: 1rem;
+    }
+    .agents-grid {
+      display              : grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap                  : 1rem;
+    }
+
+    .agent-card {
+      background  : var(--surface);
+      border      : 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow    : hidden;
+      transition  : border-color .2s;
+    }
+    .agent-card:hover { border-color: var(--accent); }
+
+    .agent-header {
+      padding    : 1rem 1.25rem .75rem;
+      border-bottom: 1px solid var(--border);
+      display    : flex;
+      align-items: center;
+      gap        : .75rem;
+    }
+    .agent-avatar {
+      width       : 40px;
+      height      : 40px;
+      border-radius: 50%;
+      background  : linear-gradient(135deg, var(--accent), var(--accent2));
+      display     : flex;
+      align-items : center;
+      justify-content: center;
+      font-size   : 1.1rem;
+      flex-shrink : 0;
+    }
+    .agent-meta h3 { font-size: .95rem; font-weight: 600; }
+    .agent-meta span { font-size: .75rem; color: var(--muted); }
+
+    .agent-body { padding: 1rem 1.25rem; }
+    .prompt-label {
+      font-size   : .7rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color       : var(--muted);
+      margin-bottom: .4rem;
+    }
+    .prompt-text {
+      font-size   : .8rem;
+      color       : var(--muted);
+      line-height : 1.6;
+      max-height  : 120px;
+      overflow    : hidden;
+      position    : relative;
+      transition  : max-height .4s ease;
+    }
+    .prompt-text.expanded { max-height: 1000px; }
+    .prompt-text:not(.expanded)::after {
+      content    : '';
+      position   : absolute;
+      bottom     : 0; left: 0; right: 0;
+      height     : 40px;
+      background : linear-gradient(transparent, var(--surface));
+    }
+    .expand-btn {
+      margin-top : .5rem;
+      background : none;
+      border     : none;
+      color      : var(--accent);
+      font-size  : .78rem;
+      cursor     : pointer;
+      padding    : 0;
+    }
+    .copy-btn {
+      margin-top : .6rem;
+      background : rgba(108,99,255,.12);
+      border     : 1px solid rgba(108,99,255,.3);
+      color      : var(--accent);
+      font-size  : .75rem;
+      padding    : .35rem .75rem;
+      border-radius: 6px;
+      cursor     : pointer;
+      transition : background .2s;
+    }
+    .copy-btn:hover { background: rgba(108,99,255,.25); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar            { width: 6px; }
+    ::-webkit-scrollbar-track      { background: transparent; }
+    ::-webkit-scrollbar-thumb      { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover{ background: var(--muted); }
+
+    /* ── Spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display     : inline-block;
+      width       : 14px; height: 14px;
+      border      : 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation   : spin .7s linear infinite;
+      vertical-align: middle;
+      margin-right: .4rem;
+    }
+
+    /* ── Embed progress bar ── */
+    .progress-wrap {
+      background   : var(--border);
+      border-radius: 999px;
+      height       : 4px;
+      margin-top   : .25rem;
+      overflow     : hidden;
+      display      : none;
+    }
+    .progress-bar {
+      height          : 100%;
+      background      : linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius   : 999px;
+      width           : 0%;
+      transition      : width .3s;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <h1>Multi-Agent Generator</h1>
+    <p>Enter a website URL to crawl, analyse, and auto-generate specialised AI agents.</p>
+  </header>
+
+  <!-- Input -->
+  <div class="input-card">
+    <input id="urlInput" type="url" placeholder="https://example.com" value="https://vomyra.com/" />
+    <button class="btn" id="runBtn" onclick="startPipeline()">Run Pipeline</button>
+  </div>
+
+  <!-- Steps -->
+  <div class="steps" id="steps">
+    <div class="step" id="step-crawl">   <span class="icon">🕷️</span>Crawling</div>
+    <div class="step" id="step-chunk">   <span class="icon">✂️</span>Chunking</div>
+    <div class="step" id="step-embed">   <span class="icon">🔢</span>Embedding</div>
+    <div class="step" id="step-store">   <span class="icon">🗄️</span>Storing</div>
+    <div class="step" id="step-industry"><span class="icon">🏭</span>Industry</div>
+    <div class="step" id="step-agents"> <span class="icon">🤖</span>Agents</div>
+  </div>
+
+  <!-- Embed progress bar -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-box" id="logBox"></div>
+
+  <!-- Industry card -->
+  <div class="industry-card" id="industryCard">
+    <h2>Detected Business Profile</h2>
+    <div class="industry-grid" id="industryGrid"></div>
+  </div>
+
+  <!-- Agents -->
+  <div id="agents-section">
+    <h2 id="agentsHeading">Generated Agents</h2>
+    <div class="agents-grid" id="agentsGrid"></div>
+  </div>
+
+</div>
+
+<script>
+const STEP_ORDER = ['crawl','chunk','embed','store','industry','agents'];
+const AGENT_ICONS = ['🤖','🧠','💼','📞','📣','🛠️','📊','🔍'];
+
+let currentEventSource = null;
+
+function log(msg, cls = 'info') {
+  const box = document.getElementById('logBox');
+  box.style.display = 'block';
+  const line = document.createElement('div');
+  line.className = `line ${cls}`;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function setStep(step, state) {
+  const el = document.getElementById(`step-${step}`);
+  if (!el) return;
+  el.className = `step ${state}`;
+}
+
+function activateStep(step) {
+  // Mark previous steps done
+  const idx = STEP_ORDER.indexOf(step);
+  STEP_ORDER.forEach((s, i) => {
+    if (i < idx)  setStep(s, 'done');
+    if (i === idx) setStep(s, 'active');
+  });
+}
+
+function renderIndustry(data) {
+  const card = document.getElementById('industryCard');
+  const grid = document.getElementById('industryGrid');
+  card.style.display = 'block';
+
+  grid.innerHTML = `
+    <div class="field"><label>Industry</label><p>${data.industry}</p></div>
+    <div class="field"><label>Business Type</label><p>${data.business_type}</p></div>
+    <div class="field" style="grid-column:1/-1">
+      <label>Key Topics</label>
+      <div class="tags">${(data.key_topics||[]).map(t=>`<span class="tag">${t}</span>`).join('')}</div>
+    </div>
+    <div class="field" style="grid-column:1/-1">
+      <label>Suggested Agents</label>
+      <div class="tags">${(data.suggested_agents||[]).map(a=>`<span class="tag">${a}</span>`).join('')}</div>
+    </div>
+  `;
+}
+
+function renderAgents(agents) {
+  const section = document.getElementById('agents-section');
+  const grid    = document.getElementById('agentsGrid');
+  const heading = document.getElementById('agentsHeading');
+  section.style.display = 'block';
+  heading.textContent   = `Generated Agents (${agents.length})`;
+  grid.innerHTML        = '';
+
+  agents.forEach((agent, i) => {
+    const icon  = AGENT_ICONS[i % AGENT_ICONS.length];
+    const card  = document.createElement('div');
+    card.className = 'agent-card';
+    const promptId = `prompt-${i}`;
+    card.innerHTML = `
+      <div class="agent-header">
+        <div class="agent-avatar">${icon}</div>
+        <div class="agent-meta">
+          <h3>${agent.name}</h3>
+          <span>${agent.role}</span>
+        </div>
+      </div>
+      <div class="agent-body">
+        <div class="prompt-label">System Prompt</div>
+        <div class="prompt-text" id="${promptId}">${escHtml(agent.prompt)}</div>
+        <button class="expand-btn" onclick="togglePrompt('${promptId}', this)">Show more ▾</button>
+        <br/>
+        <button class="copy-btn" onclick="copyPrompt(${i})">Copy Prompt</button>
+      </div>
+    `;
+    card.dataset.prompt = agent.prompt;
+    grid.appendChild(card);
+  });
+}
+
+function togglePrompt(id, btn) {
+  const el = document.getElementById(id);
+  el.classList.toggle('expanded');
+  btn.textContent = el.classList.contains('expanded') ? 'Show less ▴' : 'Show more ▾';
+}
+
+function copyPrompt(i) {
+  const cards = document.querySelectorAll('.agent-card');
+  navigator.clipboard.writeText(cards[i].dataset.prompt).then(() => {
+    const btn = cards[i].querySelector('.copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy Prompt', 1500);
+  });
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function resetUI() {
+  // Reset steps
+  STEP_ORDER.forEach(s => setStep(s, ''));
+  // Hide sections
+  document.getElementById('logBox').style.display    = 'none';
+  document.getElementById('logBox').innerHTML        = '';
+  document.getElementById('industryCard').style.display = 'none';
+  document.getElementById('agents-section').style.display = 'none';
+  document.getElementById('agentsGrid').innerHTML    = '';
+  document.getElementById('progressWrap').style.display = 'none';
+  document.getElementById('progressBar').style.width = '0%';
+}
+
+function startPipeline() {
+  const url = document.getElementById('urlInput').value.trim();
+  if (!url) { alert('Please enter a URL.'); return; }
+
+  if (currentEventSource) { currentEventSource.close(); }
+
+  resetUI();
+
+  const runBtn = document.getElementById('runBtn');
+  runBtn.disabled = true;
+  runBtn.innerHTML = '<span class="spinner"></span>Running…';
+
+  const evtSrc = new EventSource(`/api/stream?url=${encodeURIComponent(url)}`);
+  currentEventSource = evtSrc;
+
+  evtSrc.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === 'progress') {
+      activateStep(msg.step);
+      log(msg.message);
+
+      if (msg.step === 'embed') {
+        const wrap = document.getElementById('progressWrap');
+        const bar  = document.getElementById('progressBar');
+        wrap.style.display = 'block';
+        if (msg.pct !== undefined) bar.style.width = msg.pct + '%';
+      } else {
+        document.getElementById('progressWrap').style.display = 'none';
+      }
+    }
+
+    if (msg.type === 'industry') {
+      setStep('industry', 'done');
+      renderIndustry(msg.data);
+      log('Industry detected: ' + msg.data.industry, 'success');
+    }
+
+    if (msg.type === 'agents') {
+      setStep('agents', 'done');
+      renderAgents(msg.data);
+      log(`Generated ${msg.data.length} agents.`, 'success');
+    }
+
+    if (msg.type === 'done') {
+      STEP_ORDER.forEach(s => setStep(s, 'done'));
+      log('Pipeline complete!', 'success');
+      evtSrc.close();
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run Pipeline';
+    }
+
+    if (msg.type === 'error') {
+      log('Error: ' + msg.message, 'error');
+      STEP_ORDER.forEach(s => {
+        const el = document.getElementById(`step-${s}`);
+        if (el && el.classList.contains('active')) setStep(s, 'error');
+      });
+      evtSrc.close();
+      runBtn.disabled = false;
+      runBtn.textContent = 'Run Pipeline';
+    }
+  };
+
+  evtSrc.onerror = () => {
+    log('Connection lost.', 'error');
+    evtSrc.close();
+    runBtn.disabled = false;
+    runBtn.textContent = 'Run Pipeline';
+  };
+}
+
+// Allow Enter key to submit
+document.getElementById('urlInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startPipeline();
+});
+</script>
+</body>
+</html>
