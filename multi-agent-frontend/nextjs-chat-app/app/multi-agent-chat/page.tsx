@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useUser } from '../../components/UserContext';
 
 const BACKEND_URL = 'http://localhost:3001';
 
@@ -17,6 +18,22 @@ interface ChatMessage {
     content: string;
     agentName?: string;
     agentRole?: string;
+    intentUnderstood?: string;
+    action?: string | null;
+    isClarifying?: boolean;   // agent is asking for more info before final answer
+}
+
+// Orchestration context saved between needs_input turns
+interface PendingContext {
+    orchestration: {
+        chosen_agent: string;
+        user_language: string;
+        intent: string;
+        topic: string;
+        entities: Record<string, string>;
+        reformatted_query: string;
+    };
+    enrichedEntities: Record<string, string>;
 }
 
 const AGENT_COLORS = [
@@ -29,12 +46,14 @@ const AGENT_COLORS = [
 
 export default function MultiAgentChatPage() {
     const router = useRouter();
+    const { user } = useUser();
     const [agents, setAgents] = useState<Agent[]>([]);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [routingTo, setRoutingTo] = useState<string | null>(null);
     const [groupId, setGroupId] = useState<string | null>(null);
+    const [pendingContext, setPendingContext] = useState<PendingContext | null>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -63,31 +82,59 @@ export default function MultiAgentChatPage() {
         const text = input.trim();
         if (!text || loading || agents.length === 0) return;
 
+        const updatedMessages: ChatMessage[] = [...messages, { role: 'user', content: text }];
         setInput('');
-        setMessages(prev => [...prev, { role: 'user', content: text }]);
+        setMessages(updatedMessages);
         setLoading(true);
-        setRoutingTo('Analyzing your message…');
+        setRoutingTo(pendingContext ? 'Agent is processing your answer…' : 'Orchestrator is routing your message…');
 
         try {
             const res = await fetch(`${BACKEND_URL}/chat/orchestrate`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: text, agents, groupId }),
+                headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
+                body: JSON.stringify({
+                    message: text,
+                    agents,
+                    groupId,
+                    conversationHistory: updatedMessages.map(m => ({
+                        role: m.role,
+                        content: m.content,
+                        agentName: m.agentName,
+                    })),
+                    pendingContext,
+                }),
             });
             const data = await res.json();
 
             setRoutingTo(null);
-
             if (!res.ok) throw new Error(data.error || 'Server error');
 
-            setMessages(prev => [...prev, {
-                role: 'agent',
-                content: data.response,
-                agentName: data.agent?.name,
-                agentRole: data.agent?.role,
-            }]);
+            if (data.status === 'needs_input') {
+                // Orchestrator could not find missing info in RAG — ask the user
+                setPendingContext(data.pendingContext);
+                setMessages(prev => [...prev, {
+                    role: 'agent',
+                    content: data.question,
+                    agentName: data.agent?.name,
+                    agentRole: data.agent?.role,
+                    isClarifying: true,
+                }]);
+            } else {
+                // Final answer — clear pending context
+                setPendingContext(null);
+                const isMetaAgent = data.agent?.name?.toLowerCase().includes('meta');
+                setMessages(prev => [...prev, {
+                    role: 'agent',
+                    content: isMetaAgent ? '✓ Done — your update has been applied.' : data.response,
+                    agentName: data.agent?.name,
+                    agentRole: data.agent?.role,
+                    intentUnderstood: isMetaAgent ? undefined : data.intent_understood,
+                    action: isMetaAgent ? undefined : data.action,
+                }]);
+            }
         } catch (err: unknown) {
             setRoutingTo(null);
+            setPendingContext(null);
             const msg = err instanceof Error ? err.message : 'Unknown error';
             setMessages(prev => [...prev, {
                 role: 'agent',
@@ -260,6 +307,7 @@ export default function MultiAgentChatPage() {
                     // Agent response
                     const [c1, c2] = agentColor(msg.agentName ?? '');
                     const isError = msg.agentRole === 'Error';
+                    const isClarifying = msg.isClarifying;
                     return (
                         <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
                             <div style={{
@@ -273,28 +321,60 @@ export default function MultiAgentChatPage() {
                                 {msg.agentName?.charAt(0).toUpperCase() ?? 'A'}
                             </div>
                             <div style={{ maxWidth: '72%', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                {/* Routing label */}
+                                {/* Agent label + clarifying badge */}
                                 <div style={{
                                     fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px',
                                     textTransform: 'uppercase', color: isError ? '#f87171' : c1, opacity: 0.8,
-                                    display: 'flex', alignItems: 'center', gap: '5px',
+                                    display: 'flex', alignItems: 'center', gap: '6px',
                                 }}>
                                     <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                                     </svg>
                                     {msg.agentName} · {msg.agentRole}
+                                    {isClarifying && (
+                                        <span style={{
+                                            fontSize: '9px', fontWeight: 700, letterSpacing: '0.5px',
+                                            padding: '2px 7px', borderRadius: '20px',
+                                            background: `${c1}25`, color: c1,
+                                            border: `1px solid ${c1}50`,
+                                            textTransform: 'uppercase',
+                                        }}>
+                                            needs info
+                                        </span>
+                                    )}
                                 </div>
                                 <div style={{
                                     padding: '12px 16px',
                                     borderRadius: '4px 18px 18px 18px',
-                                    background: isError ? 'rgba(239,68,68,0.08)' : 'rgba(26,32,53,0.95)',
-                                    border: `1px solid ${isError ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.07)'}`,
+                                    background: isError ? 'rgba(239,68,68,0.08)' : isClarifying ? `${c1}12` : 'rgba(26,32,53,0.95)',
+                                    border: `1px solid ${isError ? 'rgba(239,68,68,0.25)' : isClarifying ? `${c1}40` : 'rgba(255,255,255,0.07)'}`,
                                     fontSize: '14px', lineHeight: '1.65', color: '#f1f3f9',
                                     wordBreak: 'break-word', whiteSpace: 'pre-wrap',
                                     boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
                                 }}>
                                     {msg.content}
                                 </div>
+                                {/* Action badge + intent hint */}
+                                {(msg.action || msg.intentUnderstood) && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', paddingLeft: '4px' }}>
+                                        {msg.action && msg.action !== 'null' && (
+                                            <span style={{
+                                                fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px',
+                                                textTransform: 'uppercase',
+                                                padding: '3px 9px', borderRadius: '20px',
+                                                background: `${c1}20`, color: c1,
+                                                border: `1px solid ${c1}40`,
+                                            }}>
+                                                {msg.action.replace(/_/g, ' ')}
+                                            </span>
+                                        )}
+                                        {msg.intentUnderstood && (
+                                            <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)', fontStyle: 'italic' }}>
+                                                {msg.intentUnderstood}
+                                            </span>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     );

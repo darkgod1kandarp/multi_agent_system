@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
+import { useUser } from '../UserContext';
 
 export interface Agent {
     name: string;
@@ -27,6 +28,7 @@ const BACKEND_URL = 'http://localhost:3001';
 const hasURL = (text: string) => /(https?:\/\/[^\s]+)/g.test(text);
 
 const ChatWindow = () => {
+    const { user, isMaster } = useUser();
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(false);
     const [loadingMode, setLoadingMode] = useState<'chat' | 'agent'>('chat');
@@ -45,10 +47,19 @@ const ChatWindow = () => {
 
         try {
             if (isAgentRequest) {
-                // ── Agent generation: POST /creating/agent ──
+                // ── Agent generation: master only ──
+                if (!isMaster) {
+                    setMessages(prev => [...prev, {
+                        sender: 'AI',
+                        message: 'Only master users can generate agents from a URL. Ask an admin to grant you master access.',
+                        isError: true,
+                    }]);
+                    setLoading(false);
+                    return;
+                }
                 const res = await fetch(`${BACKEND_URL}/creating/agent`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
                     body: JSON.stringify({ message: userMessage }),
                 });
                 const data = await res.json();
@@ -160,7 +171,10 @@ const ChatWindow = () => {
                 gap: '6px',
             }}>
                 <span>💬</span>
-                <span>Chat freely with Vomyra AI &nbsp;·&nbsp; 🔗 Paste a URL to generate agents — e.g. <em>"Analyze https://example.com"</em></span>
+                {isMaster
+                    ? <span>Chat freely with Vomyra AI &nbsp;·&nbsp; 🔗 Paste a URL to generate agents — e.g. <em>"Analyze https://example.com"</em></span>
+                    : <span>Chat freely with Vomyra AI &nbsp;·&nbsp; <span style={{ color: 'rgba(168,85,247,0.7)' }}>★ Master users</span> can generate agents from a URL</span>
+                }
             </div>
 
             {/* Messages */}

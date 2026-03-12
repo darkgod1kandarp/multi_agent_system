@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Agent } from './ChatWindow';
+import { useUser } from '../UserContext';
 
 const BACKEND_URL = 'http://localhost:3001';
 
@@ -12,6 +13,15 @@ interface ChatMessageProps {
     agents?: Agent[];
     groupId?: string;
     isError?: boolean;
+}
+
+interface TestResult {
+    passed: boolean;
+    avgScore: number;
+    summary: string;
+    attempts: number;
+    scopeCheck: { in_scope: boolean; violations: string[]; summary: string; };
+    testResults: Array<{ testCase: string; passed: boolean; score: number; reason: string; }>;
 }
 
 const GRADIENTS = [
@@ -35,19 +45,76 @@ function resolveExplanation(agent: Agent): string {
     ) as string || '';
 }
 
+// ─── TestResultBanner ────────────────────────────────────────────────────────
+
+const TestResultBanner = ({ result }: { result: TestResult }) => {
+    const [expanded, setExpanded] = useState(false);
+    const failed = result.testResults.filter(r => !r.passed);
+    const hasDetails = failed.length > 0 || (result.scopeCheck.violations && result.scopeCheck.violations.length > 0);
+
+    return (
+        <div style={{
+            borderRadius: '8px',
+            border: `1px solid ${result.passed ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`,
+            background: result.passed ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)',
+            overflow: 'hidden',
+        }}>
+            <div
+                style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    padding: '8px 12px', cursor: hasDetails ? 'pointer' : 'default',
+                    userSelect: 'none',
+                }}
+                onClick={() => hasDetails && setExpanded(e => !e)}
+            >
+                <span style={{ fontSize: '13px' }}>{result.passed ? '✅' : '❌'}</span>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: result.passed ? '#4ade80' : '#f87171', flex: 1 }}>
+                    {result.passed ? 'Tests passed' : 'Tests failed'}
+                    {' · '}Score: {result.avgScore}/5
+                    {' · '}Attempt{result.attempts !== 1 ? 's' : ''}: {result.attempts}
+                </span>
+                {hasDetails && (
+                    <span style={{ fontSize: '11px', color: 'rgba(180,190,220,0.5)' }}>
+                        {expanded ? '▲ hide' : '▼ details'}
+                    </span>
+                )}
+            </div>
+
+            {expanded && hasDetails && (
+                <div style={{ padding: '0 12px 10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {result.scopeCheck.violations && result.scopeCheck.violations.length > 0 && (
+                        <div style={{ fontSize: '11px', color: '#fca5a5', background: 'rgba(239,68,68,0.08)', borderRadius: '6px', padding: '6px 10px' }}>
+                            <strong>Scope:</strong> {result.scopeCheck.summary}
+                        </div>
+                    )}
+                    {failed.map((r, i) => (
+                        <div key={i} style={{ fontSize: '11px', color: '#cbd5e1', background: 'rgba(0,0,0,0.2)', borderRadius: '6px', padding: '6px 10px', lineHeight: 1.5 }}>
+                            <div style={{ color: '#f87171', marginBottom: '2px', fontWeight: 600 }}>
+                                Test failed · Score {r.score}/5
+                            </div>
+                            <div style={{ opacity: 0.7 }}>{r.reason}</div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
 // ─── ChatMessage ────────────────────────────────────────────────────────────
 
 const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, groupId, isError }) => {
     const isUser = sender === 'User';
     const router = useRouter();
+    const { user, isMaster } = useUser();
 
-    // Lift explanation texts so "Finalize All" can read them
     const [explanations, setExplanations] = useState<string[]>(
         () => (agents ?? []).map(resolveExplanation)
     );
     const [removedIndices, setRemovedIndices] = useState<Set<number>>(new Set());
     const [customAgents, setCustomAgents] = useState<Agent[]>([]);
     const [customExplanations, setCustomExplanations] = useState<string[]>([]);
+    const [customTestResults, setCustomTestResults] = useState<(TestResult | null)[]>([]);
     const [showAddForm, setShowAddForm] = useState(false);
     const [newAgentName, setNewAgentName] = useState('');
     const [newAgentRole, setNewAgentRole] = useState('');
@@ -65,6 +132,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
     const handleRemoveCustomAgent = (index: number) => {
         setCustomAgents(prev => prev.filter((_, i) => i !== index));
         setCustomExplanations(prev => prev.filter((_, i) => i !== index));
+        setCustomTestResults(prev => prev.filter((_, i) => i !== index));
     };
 
     const handleAddAgent = async () => {
@@ -74,7 +142,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
         try {
             const res = await fetch(`${BACKEND_URL}/agent/new`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
                 body: JSON.stringify({
                     message: { name: newAgentName.trim(), role: newAgentRole.trim(), description: newAgentDesc.trim() },
                     existingAgents: allAgents.map(a => ({ name: a.name, role: a.role })),
@@ -86,9 +154,17 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                 setAddAgentError(result.reason || 'Cannot create this agent.');
                 return;
             }
-            const newAgent: Agent = { name: newAgentName.trim(), role: newAgentRole.trim(), prompt: result.prompt || '' };
+            // Use the finalAgent prompt if available (it was fixed by the retry loop)
+            const finalAgent = data.finalAgent || {};
+            const newAgent: Agent = {
+                name: newAgentName.trim(),
+                role: newAgentRole.trim(),
+                prompt: finalAgent.prompt || result.prompt || '',
+                ...finalAgent,
+            };
             setCustomAgents(prev => [...prev, newAgent]);
-            setCustomExplanations(prev => [...prev, newAgentDesc.trim()]);
+            setCustomExplanations(prev => [...prev, finalAgent.Explanation || newAgentDesc.trim()]);
+            setCustomTestResults(prev => [...prev, data.testResult || null]);
             setNewAgentName('');
             setNewAgentRole('');
             setNewAgentDesc('');
@@ -102,7 +178,6 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
 
     const [agentOverrides, setAgentOverrides] = useState<Record<number, Agent>>({});
 
-    // Keep original indices so overrides can be looked up by original position
     const visibleOriginal = (agents ?? [])
         .map((a, i) => ({ agent: agentOverrides[i] ?? a, origIdx: i }))
         .filter(({ origIdx }) => !removedIndices.has(origIdx));
@@ -125,7 +200,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
             }));
             const res = await fetch(`${BACKEND_URL}/agent/finalize`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
                 body: JSON.stringify({ agents: payload, groupId }),
             });
             if (!res.ok) throw new Error('Server error');
@@ -185,21 +260,22 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                                 {allAgents.length} Agent{allAgents.length !== 1 ? 's' : ''} Generated
                             </span>
 
-                            {/* Finalize All button */}
+                            {/* Finalize All button — master only */}
                             {!finalizedAll ? (
                                 <button
                                     onClick={handleFinalizeAll}
-                                    disabled={finalizeAllLoading}
+                                    disabled={finalizeAllLoading || !isMaster}
+                                    title={!isMaster ? 'Only master users can finalize agents' : undefined}
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: '6px',
-                                        background: 'linear-gradient(135deg,#4f7fff,#9c4fff)',
+                                        background: (!isMaster || finalizeAllLoading) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg,#4f7fff,#9c4fff)',
                                         border: 'none', borderRadius: '8px',
                                         padding: '6px 14px', color: '#fff',
                                         fontSize: '12px', fontWeight: 600,
-                                        cursor: finalizeAllLoading ? 'not-allowed' : 'pointer',
+                                        cursor: (!isMaster || finalizeAllLoading) ? 'not-allowed' : 'pointer',
                                         fontFamily: 'inherit',
-                                        opacity: finalizeAllLoading ? 0.7 : 1,
-                                        boxShadow: '0 3px 14px rgba(99,102,241,0.4)',
+                                        opacity: (!isMaster || finalizeAllLoading) ? 0.5 : 1,
+                                        boxShadow: (!isMaster || finalizeAllLoading) ? 'none' : '0 3px 14px rgba(99,102,241,0.4)',
                                     }}
                                 >
                                     {finalizeAllLoading ? (
@@ -240,6 +316,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                                 agent={agent}
                                 index={visIdx}
                                 explanation={explanations[origIdx]}
+                                testResult={null}
                                 onExplanationChange={(text) => setExplanations(prev => { const next = [...prev]; next[origIdx] = text; return next; })}
                                 onRemove={() => handleRemoveAgent(origIdx)}
                                 onUpdate={(updated, newExp) => {
@@ -247,6 +324,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                                     setExplanations(prev => { const next = [...prev]; next[origIdx] = newExp; return next; });
                                 }}
                                 allAgents={allAgents}
+                                isMaster={isMaster}
+                                userId={user?.id ?? ''}
                             />
                         ))}
 
@@ -256,6 +335,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                                 agent={agent}
                                 index={visibleAgents.length + i}
                                 explanation={customExplanations[i]}
+                                testResult={customTestResults[i] || null}
                                 onExplanationChange={(text) => setCustomExplanations(prev => { const next = [...prev]; next[i] = text; return next; })}
                                 onRemove={() => handleRemoveCustomAgent(i)}
                                 onUpdate={(updated, newExp) => {
@@ -263,11 +343,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                                     setCustomExplanations(prev => { const next = [...prev]; next[i] = newExp; return next; });
                                 }}
                                 allAgents={allAgents}
+                                isMaster={isMaster}
+                                userId={user?.id ?? ''}
                             />
                         ))}
 
-                        {/* Add Agent Form */}
-                        {showAddForm ? (
+                        {/* Add Agent Form — master only */}
+                        {!isMaster ? null : showAddForm ? (
                             <div style={{ background: 'rgba(15,20,35,0.95)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '16px', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                                 <div style={{ fontSize: '12px', fontWeight: 700, color: '#818cf8', letterSpacing: '0.7px', textTransform: 'uppercase' }}>New Agent</div>
                                 <input
@@ -298,7 +380,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                                     <button onClick={() => { setShowAddForm(false); setAddAgentError(''); }} style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'rgba(200,210,240,0.6)', fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
                                     <button onClick={handleAddAgent} disabled={!newAgentName.trim() || !newAgentRole.trim() || addAgentLoading} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 16px', background: 'linear-gradient(135deg,#4f7fff,#9c4fff)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: !newAgentName.trim() || !newAgentRole.trim() || addAgentLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: !newAgentName.trim() || !newAgentRole.trim() || addAgentLoading ? 0.6 : 1 }}>
                                         {addAgentLoading && <span style={{ width: 10, height: 10, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />}
-                                        {addAgentLoading ? 'Checking...' : 'Add Agent'}
+                                        {addAgentLoading ? 'Validating & testing...' : 'Add Agent'}
                                     </button>
                                 </div>
                             </div>
@@ -328,13 +410,16 @@ interface AgentCardProps {
     agent: Agent;
     index: number;
     explanation: string;
+    testResult: TestResult | null;
     onExplanationChange: (text: string) => void;
     onRemove: () => void;
     onUpdate: (updatedAgent: Agent, newExplanation: string) => void;
     allAgents: Agent[];
+    isMaster: boolean;
+    userId: string;
 }
 
-const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, onUpdate, allAgents }: AgentCardProps) => {
+const AgentCard = ({ agent, index, explanation, testResult, onExplanationChange, onRemove, onUpdate, allAgents, isMaster, userId }: AgentCardProps) => {
     const [start, end] = GRADIENTS[index % GRADIENTS.length];
 
     const [isEditing, setIsEditing] = useState(false);
@@ -344,6 +429,7 @@ const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, o
     const [updateLoading, setUpdateLoading] = useState(false);
     const [updateError, setUpdateError] = useState('');
     const [editSaved, setEditSaved] = useState(false);
+    const [localTestResult, setLocalTestResult] = useState<TestResult | null>(testResult);
 
     const initial = (draftName || agent.name)?.charAt(0)?.toUpperCase() ?? '?';
 
@@ -362,7 +448,7 @@ const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, o
         try {
             const res = await fetch(`${BACKEND_URL}/agent/update`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
                 body: JSON.stringify({
                     agent: { name: draftName.trim(), role: draftRole.trim(), description: draftText.trim() },
                     existingAgents: allAgents.map(a => ({ name: a.name, role: a.role })),
@@ -374,10 +460,19 @@ const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, o
                 setUpdateError(result.reason || 'Cannot update this agent.');
                 return;
             }
-            const updatedAgent: Agent = { ...agent, name: draftName.trim(), role: draftRole.trim(), prompt: result.prompt || agent.prompt };
-            const newExplanation = result.Explanation || draftText.trim();
+            // Use finalAgent prompt if available (it was fixed by the retry loop)
+            const finalAgent = data.finalAgent || {};
+            const updatedAgent: Agent = {
+                ...agent,
+                name: draftName.trim(),
+                role: draftRole.trim(),
+                prompt: finalAgent.prompt || result.prompt || agent.prompt,
+                ...finalAgent,
+            };
+            const newExplanation = finalAgent.Explanation || result.Explanation || draftText.trim();
             onUpdate(updatedAgent, newExplanation);
             onExplanationChange(newExplanation);
+            setLocalTestResult(data.testResult || null);
             setIsEditing(false);
             setEditSaved(true);
             setTimeout(() => setEditSaved(false), 2000);
@@ -422,7 +517,7 @@ const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, o
                 }}>
                     AGENT {index + 1}
                 </div>
-                <button
+                {isMaster && <button
                     onClick={onRemove}
                     title="Remove agent"
                     style={{
@@ -437,7 +532,7 @@ const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, o
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
                     </svg>
-                </button>
+                </button>}
             </div>
 
             {/* Body */}
@@ -452,8 +547,8 @@ const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, o
                         {editSaved && <span style={{ fontSize: '11px', color: '#22c55e', fontWeight: 600 }}>✓ Saved</span>}
                     </div>
 
-                    {/* Edit / Save / Cancel */}
-                    {!isEditing ? (
+                    {/* Edit / Save / Cancel — master only */}
+                    {!isMaster ? null : !isEditing ? (
                         <button onClick={handleEdit}
                             style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '7px', padding: '4px 10px', color: 'rgba(200,210,240,0.7)', fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}
                             onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = `${start}22`; (e.currentTarget as HTMLButtonElement).style.borderColor = `${start}66`; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
@@ -470,7 +565,7 @@ const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, o
                             <button onClick={handleCancel} disabled={updateLoading} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '7px', padding: '4px 12px', color: 'rgba(200,210,240,0.6)', fontSize: '12px', fontWeight: 500, cursor: updateLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>Cancel</button>
                             <button onClick={handleSave} disabled={updateLoading || !draftName.trim() || !draftRole.trim()} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: `linear-gradient(135deg,${start},${end})`, border: 'none', borderRadius: '7px', padding: '4px 14px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: updateLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: updateLoading ? 0.7 : 1, boxShadow: `0 2px 10px ${start}55` }}>
                                 {updateLoading && <span style={{ width: 9, height: 9, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />}
-                                {updateLoading ? 'Saving...' : 'Save'}
+                                {updateLoading ? 'Saving & testing...' : 'Save'}
                             </button>
                         </div>
                     )}
@@ -499,6 +594,9 @@ const AgentCard = ({ agent, index, explanation, onExplanationChange, onRemove, o
                         {explanation || 'No description available.'}
                     </p>
                 )}
+
+                {/* Test result banner */}
+                {localTestResult && <TestResultBanner result={localTestResult} />}
             </div>
         </div>
     );

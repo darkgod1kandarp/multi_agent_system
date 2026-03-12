@@ -1,7 +1,30 @@
-import React from 'react';
+"use client";
+
 import ChatWindow from '../components/chat/ChatWindow';
+import { useEffect } from 'react';
+import { useUser } from '../components/UserContext';
+import { useRouter } from 'next/navigation';
+
+const BACKEND_URL = 'http://localhost:3001';
 
 const Page = () => {
+    const { user, setUser, isMaster } = useUser();
+    const router = useRouter();
+
+    // Re-sync role from backend in case it changed since last login
+    useEffect(() => {
+        if (!user) return;
+        fetch(`${BACKEND_URL}/users`)
+            .then(r => r.json())
+            .then(data => {
+                const fresh = (data.users || []).find((u: { id: string; username: string; role: 'master' | 'normal' }) => u.id === user.id);
+                if (fresh && fresh.role !== user.role) {
+                    setUser({ id: fresh.id, username: fresh.username, role: fresh.role });
+                }
+            })
+            .catch(() => {});
+    }, [user?.id]);
+
     return (
         <div style={{
             display: 'flex',
@@ -57,16 +80,71 @@ const Page = () => {
                     }}>Vomyra Chat</span>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{
-                        fontSize: '12px',
-                        fontWeight: 500,
-                        color: '#22c55e',
-                        background: 'rgba(34,197,94,0.1)',
-                        border: '1px solid rgba(34,197,94,0.25)',
-                        padding: '4px 10px',
-                        borderRadius: '20px',
-                    }}>● Online</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {user && isMaster && (
+                        <button
+                            onClick={() => router.push('/admin')}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '6px',
+                                padding: '6px 14px',
+                                background: 'rgba(168,85,247,0.12)',
+                                border: '1px solid rgba(168,85,247,0.3)',
+                                borderRadius: '8px',
+                                color: '#c084fc',
+                                fontSize: '12px', fontWeight: 600,
+                                cursor: 'pointer', fontFamily: 'inherit',
+                                transition: 'all 0.15s',
+                            }}
+                        >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+                            </svg>
+                            Manage Users
+                        </button>
+                    )}
+                    {user && (
+                        <>
+                            {/* User avatar */}
+                            <div style={{
+                                width: 30, height: 30, borderRadius: '50%',
+                                background: isMaster
+                                    ? 'linear-gradient(135deg, #a855f7, #ec4899)'
+                                    : 'linear-gradient(135deg, #4f7fff, #9c4fff)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '12px', fontWeight: 700, color: '#fff',
+                                boxShadow: isMaster ? '0 2px 8px rgba(168,85,247,0.4)' : '0 2px 8px rgba(99,102,241,0.35)',
+                                flexShrink: 0,
+                            }}>
+                                {user.username.charAt(0).toUpperCase()}
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: '#e0e7ff', lineHeight: 1 }}>
+                                    {user.username}
+                                </span>
+                                <span style={{
+                                    fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px',
+                                    color: isMaster ? '#c084fc' : '#818cf8',
+                                }}>
+                                    {isMaster ? '★ MASTER' : 'NORMAL'}
+                                </span>
+                            </div>
+                            <button
+                                onClick={() => setUser(null)}
+                                title="Switch account"
+                                style={{
+                                    padding: '4px 10px',
+                                    background: 'rgba(255,255,255,0.04)',
+                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    borderRadius: '8px',
+                                    color: 'rgba(255,255,255,0.35)',
+                                    fontSize: '11px', fontWeight: 500,
+                                    cursor: 'pointer', fontFamily: 'inherit',
+                                }}
+                            >
+                                Switch
+                            </button>
+                        </>
+                    )}
                 </div>
             </header>
 

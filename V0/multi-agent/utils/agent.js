@@ -1,5 +1,5 @@
 const { CallLLM } = require('../component/llm');
-const { agentConciusness, detectIndustryPrompt, generateAgentsSystemPrompt, generateAgentsUserPrompt, createNewAgentPrompt, updateAgentPrompt } = require('./prompt');
+const { agentConciusness, detectIndustryPrompt, generateAgentsSystemPrompt, generateAgentsUserPrompt, createNewAgentPrompt, updateAgentPrompt, parseUpdateRequestPrompt } = require('./prompt');
 
 async function DetectIndustry(searchQdrant, callLLM) {
     console.log("\n Step 1: Detecting industry from Qdrant data...");
@@ -12,6 +12,7 @@ async function DetectIndustry(searchQdrant, callLLM) {
     try {
         const cleaned = response.replace(/```json|```/g, "").trim();
         const parsed  = JSON.parse(cleaned);
+        console.log(`Company name: ${parsed.company_name}`);
         console.log(`Industry detected: ${parsed.industry}`);
         console.log(`Business type: ${parsed.business_type}`);
         console.log(`Suggested agents: ${parsed.suggested_agents.join(", ")}`);
@@ -19,6 +20,7 @@ async function DetectIndustry(searchQdrant, callLLM) {
     } catch (e) {
         console.error("Could not parse industry JSON, using defaults");
         return {
+            company_name    : "",
             industry        : "General Business",
             business_type   : "General business",
             key_topics      : ["sales", "support", "feedback"],
