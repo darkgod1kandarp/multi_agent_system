@@ -4,8 +4,9 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Agent } from './ChatWindow';
 import { useUser } from '../UserContext';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 
-const BACKEND_URL = 'http://localhost:3001';
+const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
 
 interface ChatMessageProps {
     sender: string;
@@ -140,7 +141,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
         setAddAgentLoading(true);
         setAddAgentError('');
         try {
-            const res = await fetch(`${BACKEND_URL}/agent/new`, {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/agent/new`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
                 body: JSON.stringify({
@@ -198,7 +199,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                 prompt: agent.prompt,
                 explanation: allExplanations[i] || resolveExplanation(agent),
             }));
-            const res = await fetch(`${BACKEND_URL}/agent/finalize`, {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/agent/finalize`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
                 body: JSON.stringify({ agents: payload, groupId }),
@@ -446,7 +447,7 @@ const AgentCard = ({ agent, index, explanation, testResult, onExplanationChange,
         setUpdateLoading(true);
         setUpdateError('');
         try {
-            const res = await fetch(`${BACKEND_URL}/agent/update`, {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/agent/update`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
                 body: JSON.stringify({

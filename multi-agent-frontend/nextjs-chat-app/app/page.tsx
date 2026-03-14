@@ -4,8 +4,9 @@ import ChatWindow from '../components/chat/ChatWindow';
 import { useEffect } from 'react';
 import { useUser } from '../components/UserContext';
 import { useRouter } from 'next/navigation';
+import { fetchWithTimeout } from '../lib/fetchWithTimeout';
 
-const BACKEND_URL = 'http://localhost:3001';
+const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
 
 const Page = () => {
     const { user, setUser, isMaster } = useUser();
@@ -14,7 +15,7 @@ const Page = () => {
     // Re-sync role from backend in case it changed since last login
     useEffect(() => {
         if (!user) return;
-        fetch(`${BACKEND_URL}/users`)
+        fetchWithTimeout(`${BACKEND_URL}/users`)
             .then(r => r.json())
             .then(data => {
                 const fresh = (data.users || []).find((u: { id: string; username: string; role: 'master' | 'normal' }) => u.id === user.id);

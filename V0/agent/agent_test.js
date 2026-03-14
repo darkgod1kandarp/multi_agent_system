@@ -9,45 +9,61 @@ const MODEL_ID = 'openai.gpt-oss-120b-1:0';
 const PROMPT = 'Explain the concept of recursion in programming with a simple example.';
 
 async function callBedrock(prompt) {
-    if (!BEDROCK_API_KEY) {
-        throw new Error('BEDROCK_API_KEY is not set. Add it to your .env file.');
-    }
-    if (!BEDROCK_ENDPOINT) {
-        throw new Error('BEDROCK_ENDPOINT is not set. Set it to your Bedrock OpenAI-compatible endpoint URL in .env.');
-    }
 
-    console.log('Calling Bedrock (OpenAI-compatible) API with prompt:', prompt);
 
-    const body = {
-        model: MODEL_ID,
-        messages: [
-            { role: 'system', content: 'You are a helpful assistant.' },
-            { role: 'user', content: prompt },
-        ],
-        max_tokens: 512,
-    };
+    const { BedrockRuntimeClient, ConverseCommand } = require("@aws-sdk/client-bedrock-runtime");
+        const client = new BedrockRuntimeClient({ region: "us-east-1" });
 
-    const response = await fetch(BEDROCK_ENDPOINT, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${BEDROCK_API_KEY}`,
-        },
-        body: JSON.stringify(body),
-    });
+        const command = new ConverseCommand({
+            modelId: "us.anthropic.claude-opus-4-5-20251101-v1:0",
+            messages: [{ role: "user", content: [{ text: "Hello  " }] }],
+                maxTokens: 512,
+            
+        });
 
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => '');
-        throw new Error(`Bedrock API error ${response.status}: ${errorText}`);
-    }
+        const response = await client.send(command);
+        console.log("Raw Bedrock Response:", response);
+        return response?.output?.message?.content?.[0]?.text || "";
 
-    const data = await response.json();
+    // if (!BEDROCK_API_KEY) {
+    //     throw new Error('BEDROCK_API_KEY is not set. Add it to your .env file.');
+    // }
+    // if (!BEDROCK_ENDPOINT) {
+    //     throw new Error('BEDROCK_ENDPOINT is not set. Set it to your Bedrock OpenAI-compatible endpoint URL in .env.');
+    // }
 
-    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-        throw new Error('Unexpected Bedrock response format');
-    }
+    // console.log('Calling Bedrock (OpenAI-compatible) API with prompt:', prompt);
 
-    return data.choices[0].message.content;
+    // const body = {
+    //     model: MODEL_ID,
+    //     messages: [
+    //         { role: 'system', content: 'You are a helpful assistant.' },
+    //         { role: 'user', content: prompt },
+    //     ],
+    //     max_tokens: 512,
+    // };
+
+    // const response = await fetch(BEDROCK_ENDPOINT, {
+    //     method: 'POST',
+    //     headers: {
+    //         'Content-Type': 'application/json',
+    //         Authorization: `Bearer ${BEDROCK_API_KEY}`,
+    //     },
+    //     body: JSON.stringify(body),
+    // });
+
+    // if (!response.ok) {
+    //     const errorText = await response.text().catch(() => '');
+    //     throw new Error(`Bedrock API error ${response.status}: ${errorText}`);
+    // }
+
+    // const data = await response.json();
+
+    // if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+    //     throw new Error('Unexpected Bedrock response format');
+    // }
+
+    // return data.choices[0].message.content;
 }
 
 callBedrock(PROMPT)

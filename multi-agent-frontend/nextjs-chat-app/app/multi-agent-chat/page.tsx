@@ -3,8 +3,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '../../components/UserContext';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 
-const BACKEND_URL = 'http://localhost:3001';
+const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
 
 interface Agent {
     name: string;
@@ -89,7 +90,7 @@ export default function MultiAgentChatPage() {
         setRoutingTo(pendingContext ? 'Agent is processing your answer…' : 'Orchestrator is routing your message…');
 
         try {
-            const res = await fetch(`${BACKEND_URL}/chat/orchestrate`, {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/chat/orchestrate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
                 body: JSON.stringify({

@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '../../components/UserContext';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 
-const BACKEND_URL = 'http://localhost:3001';
+const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
 
 interface UserRecord {
     id: string;
@@ -28,7 +29,7 @@ export default function AdminPage() {
     const fetchUsers = async () => {
         setLoadingUsers(true);
         try {
-            const res = await fetch(`${BACKEND_URL}/users`);
+            const res = await fetchWithTimeout(`${BACKEND_URL}/users`);
             const data = await res.json();
             setUsers(data.users || []);
         } catch {
@@ -41,7 +42,7 @@ export default function AdminPage() {
     // Re-sync logged-in user's role from backend to fix stale localStorage
     useEffect(() => {
         if (!user) return;
-        fetch(`${BACKEND_URL}/users`)
+        fetchWithTimeout(`${BACKEND_URL}/users`)
             .then(r => r.json())
             .then(data => {
                 const fresh = (data.users || []).find((u: UserRecord) => u.id === user.id);
@@ -61,7 +62,7 @@ export default function AdminPage() {
         setCreateError('');
         setCreateSuccess('');
         try {
-            const res = await fetch(`${BACKEND_URL}/user/create`, {
+            const res = await fetchWithTimeout(`${BACKEND_URL}/user/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, role: newRole }),

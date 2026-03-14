@@ -10,6 +10,19 @@ const client = new QdrantClient({
     apiKey: process.env.QDRANT_API_KEY,
 });
 
+const BEDROCK_REGION =
+    process.env.BEDROCK_REGION ||
+    process.env.AWS_REGION ||
+    process.env.AWS_DEFAULT_REGION ||
+    "us-east-1";
+const BEDROCK_API_KEY =
+    process.env.AWS_BEARER_TOKEN_BEDROCK || process.env.BEDROCK_API_KEY || "";
+const BEDROCK_EMBEDDING_MODEL =
+    process.env.BEDROCK_EMBEDDING_MODEL || "amazon.titan-embed-text-v2:0";
+const BEDROCK_EMBEDDING_ENDPOINT =
+    process.env.BEDROCK_EMBEDDING_ENDPOINT ||
+    `https://bedrock-runtime.${BEDROCK_REGION}.amazonaws.com/model/${BEDROCK_EMBEDDING_MODEL}/invoke`;
+
 
 async function SearchQdrant(collectionName, query, topK = 5) {
     const queryVector = await GenerateEmbedding(query);
@@ -40,17 +53,22 @@ async function CreateCollection(collectionName) {
 }
 
 async function GenerateEmbedding(text) {
-    const EMBEDDING_ENDPOINT = `https://bedrock-runtime.us-east-1.amazonaws.com/model/amazon.titan-embed-text-v2:0/invoke`;
-
     try {
+        if (!BEDROCK_API_KEY) {
+            console.error(
+                "Missing Bedrock API key. Set AWS_BEARER_TOKEN_BEDROCK or BEDROCK_API_KEY."
+            );
+            return null;
+        }
+
         const res = await axios.post(
-            EMBEDDING_ENDPOINT,
+            BEDROCK_EMBEDDING_ENDPOINT,
             { inputText: text },         
             {
                 headers: {
                     "Content-Type" : "application/json",
                     "Accept"       : "application/json",  
-                    "Authorization": `Bearer ${process.env.BEDROCK_API_KEY}`,
+                    "Authorization": `Bearer ${BEDROCK_API_KEY}`,
                 },
                 timeout: 15000,
             }
@@ -66,6 +84,9 @@ async function GenerateEmbedding(text) {
         return vector;
 
     } catch (error) {
+        const status = error.response?.status;
+        const data = error.response?.data;
+        console.error("Embedding error:", status || "", data || error.message);
         return null;
     }
 }
@@ -90,22 +111,6 @@ async function InsertBulkIntoQdrant(collectionName, points) {
     } catch (error) {
         console.error(`Error inserting points:`, error);
     }
-}
-
-async function SearchQdrant(collectionName, query, topK = 5) {
-    const queryVector = await GenerateEmbedding(query);
-    if (!queryVector) {
-        console.error('Failed to generate embedding for query');
-        return [];
-    }
-
-    const results = await client.search(collectionName, {
-        vector      : queryVector,
-        limit       : topK,
-        with_payload: true,
-    });
-
-    return results.map(r => r.payload?.text || "").filter(Boolean);
 }
 
 module.exports = { CreateCollection, GenerateEmbedding, CollectionExists, InsertBulkIntoQdrant, SearchQdrant };

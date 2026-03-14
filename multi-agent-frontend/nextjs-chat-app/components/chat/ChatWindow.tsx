@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import { useUser } from '../UserContext';
+import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 
 export interface Agent {
     name: string;
@@ -23,7 +24,7 @@ export interface Message {
     isLoading?: boolean;
 }
 
-const BACKEND_URL = 'http://localhost:3001';
+const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
 
 const hasURL = (text: string) => /(https?:\/\/[^\s]+)/g.test(text);
 
@@ -57,7 +58,7 @@ const ChatWindow = () => {
                     setLoading(false);
                     return;
                 }
-                const res = await fetch(`${BACKEND_URL}/creating/agent`, {
+                const res = await fetchWithTimeout(`${BACKEND_URL}/creating/agent`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
                     body: JSON.stringify({ message: userMessage }),
@@ -82,7 +83,7 @@ const ChatWindow = () => {
                 }
             } else {
                 // ── General chat: POST /chat ──
-                const res = await fetch(`${BACKEND_URL}/chat`, {
+                const res = await fetchWithTimeout(`${BACKEND_URL}/chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: userMessage }),

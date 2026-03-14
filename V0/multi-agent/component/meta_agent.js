@@ -1,57 +1,99 @@
 const { StateGraph, END, START } = require('@langchain/langgraph');
 const { DynamicStructuredTool }  = require('@langchain/core/tools');
 const { z }      = require('zod');
-const Database   = require('better-sqlite3');
-const path       = require('path');
+const { Client } = require('pg');
+const dotenv = require('dotenv');
 
-const DB_PATH = path.join(__dirname, '..', 'vomyara.db');
-const rawDb   = new Database(DB_PATH);
+dotenv.config();
+
+const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL;
+if (!SUPABASE_DB_URL) {
+    console.warn('MetaAgent: SUPABASE_DB_URL is not set. SQL tool will fail.');
+}
+
+async function withClient(fn) {
+    const client = new Client({ connectionString: SUPABASE_DB_URL });
+    await client.connect();
+    try {
+        return await fn(client);
+    } finally {
+        await client.end();
+    }
+}
 
 // ─── Single Tool: full SQL access ────────────────────────────────────────────
 
 const dbTool = new DynamicStructuredTool({
     name        : 'execute_sql',
-    description : 'Execute any SQL against the Vomyara SQLite database — reads (SELECT, PRAGMA) and writes (INSERT, UPDATE, DELETE, ALTER TABLE, CREATE TABLE). Runs all statements in order.',
+    description : 'Execute any SQL against the Vomyara Postgres database (Supabase) — reads (SELECT/SHOW/WITH) and writes (INSERT, UPDATE, DELETE, ALTER TABLE, CREATE TABLE). Runs all statements in order.',
     schema      : z.object({
         statements: z.array(z.string()).describe('SQL statements to run in order.'),
     }),
     func: async ({ statements }) => {
         const results = [];
-        for (const sql of statements) {
-            try {
-                const trimmed = sql.trim();
-                const upper   = trimmed.toUpperCase();
-                if (upper.startsWith('SELECT') || upper.startsWith('PRAGMA')) {
-                    const rows = rawDb.prepare(trimmed).all();
-                    results.push({ sql: trimmed, rows });
-                } else {
-                    const info = rawDb.prepare(trimmed).run();
-                    results.push({ sql: trimmed, changes: info.changes, lastInsertRowid: info.lastInsertRowid });
+        await withClient(async (client) => {
+            for (const sql of statements) {
+                try {
+                    const trimmed = sql.trim();
+                    const upper   = trimmed.toUpperCase();
+                    if (upper.startsWith('SELECT') || upper.startsWith('SHOW') || upper.startsWith('WITH')) {
+                        const res = await client.query(trimmed);
+                        results.push({ sql: trimmed, rows: res.rows });
+                    } else {
+                        const res = await client.query(trimmed);
+                        results.push({ sql: trimmed, rowCount: res.rowCount });
+                    }
+                } catch (e) {
+                    results.push({ sql, error: e.message });
                 }
-            } catch (e) {
-                results.push({ sql, error: e.message });
             }
-        }
+        });
         return JSON.stringify(results, null, 2);
     },
 });
 
 
-function readDBState() {
-    const tables = rawDb
-        .prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`)
-        .all().map(r => r.name);
+async function readDBState() {
+    return await withClient(async (client) => {
+        const tablesRes = await client.query(
+            `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`
+        );
+        const tables = tablesRes.rows.map(r => r.table_name);
 
-    const schema = {};
-    for (const t of tables) {
-        schema[t] = rawDb.prepare(`PRAGMA table_info(${t})`).all()
-            .map(c => ({ name: c.name, type: c.type, notnull: !!c.notnull, pk: !!c.pk }));
-    }
+        const schema = {};
+        for (const t of tables) {
+            const colsRes = await client.query(
+                `SELECT column_name, data_type, is_nullable
+                 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = $1
+                 ORDER BY ordinal_position`,
+                [t]
+            );
+            const pkRes = await client.query(
+                `SELECT kcu.column_name
+                 FROM information_schema.table_constraints tc
+                 JOIN information_schema.key_column_usage kcu
+                   ON tc.constraint_name = kcu.constraint_name
+                  AND tc.table_schema = kcu.table_schema
+                 WHERE tc.table_schema = 'public'
+                   AND tc.table_name = $1
+                   AND tc.constraint_type = 'PRIMARY KEY'`,
+                [t]
+            );
+            const pkSet = new Set(pkRes.rows.map(r => r.column_name));
+            schema[t] = colsRes.rows.map(c => ({
+                name: c.column_name,
+                type: c.data_type,
+                notnull: c.is_nullable === 'NO',
+                pk: pkSet.has(c.column_name),
+            }));
+        }
 
-    const groups = rawDb.prepare(`SELECT * FROM agent_groups ORDER BY created_at DESC`).all();
-    const agents = rawDb.prepare(`SELECT id, group_id, name, role FROM agents`).all();
+        const groupsRes = await client.query(`SELECT * FROM agent_groups ORDER BY created_at DESC`);
+        const agentsRes = await client.query(`SELECT id, group_id, name, role FROM agents`);
 
-    return { schema, groups, agents };
+        return { schema, groups: groupsRes.rows, agents: agentsRes.rows };
+    });
 }
 
 function generateSQLPrompt(userGoal, dbState, previousAttempt) {
@@ -59,7 +101,7 @@ function generateSQLPrompt(userGoal, dbState, previousAttempt) {
         ? `\nPREVIOUS ATTEMPT FAILED:\nSQL attempted:\n${previousAttempt.sqls.map(s => `  ${s}`).join('\n')}\nIssues found:\n${previousAttempt.issues.map(i => `  - ${i}`).join('\n')}\nFix these issues in your new SQL.\n`
         : '';
 
-    return `You are a database engineer with full access to the Vomyara SQLite database.
+    return `You are a database engineer with full access to the Vomyara Postgres database (Supabase).
 
 CURRENT DATABASE STATE (schema + data):
 ${JSON.stringify(dbState, null, 2)}
@@ -72,9 +114,9 @@ You can use any SQL: SELECT, PRAGMA, INSERT, UPDATE, DELETE, ALTER TABLE, CREATE
 
 Important notes about the schema:
 - agent_groups holds company info: company_name, industry, business_type, source_url, qdrant_collection
-- agents holds agent configs: the "data" column is a JSON string containing all agent fields (name, role, prompt, tone, identity, instructions[], guardrails[])
-  To update an agent field, use: UPDATE agents SET data = json_patch(data, '{"field": "value"}') WHERE name = '...' AND group_id = '...'
-  Or read + modify the JSON yourself with: json_extract(data, '$.field')
+- agents holds agent configs: the "data" column is JSONB containing all agent fields (name, role, prompt, tone, identity, instructions[], guardrails[])
+  To update an agent field, use: UPDATE agents SET data = jsonb_set(data, '{field}', '"value"'::jsonb) WHERE name = '...' AND group_id = '...'
+  Or read + modify JSON with: data->>'field'
 
 Return ONLY a valid JSON array of SQL strings (no markdown, no explanation):
 ["SQL 1", "SQL 2", ...]`;
@@ -109,7 +151,7 @@ Return ONLY valid JSON (no markdown):
 
 async function nodeReadState(state) {
     console.log('[MetaAgent][read_state] Reading DB...');
-    const dbState = readDBState();
+    const dbState = await readDBState();
     return { dbState, stateBefore: dbState };
 }
 
@@ -138,7 +180,7 @@ async function nodeExecuteSQL(state) {
         executionResult = await dbTool.func({ statements: state.sqls });
     }
     console.log('[MetaAgent][execute_sql] Result:', executionResult);
-    const dbState = readDBState();   // re-read after writes
+    const dbState = await readDBState();   // re-read after writes
     return { executionResult, dbState };
 }
 

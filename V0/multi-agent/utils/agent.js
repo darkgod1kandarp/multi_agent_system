@@ -45,7 +45,7 @@ async function CreateNewAgent(agentInfo, finalisedAgents, callLLM) {
     // will create new agent with its prompt and add it to the finalised list of agents othewise send 
     // response to user that we can not create new agent with the given information and also provide reason for it.
     
-    const response = await callLLM(createNewAgentPrompt(agentInfo, finalisedAgents), ".", 8000);
+    const response = await callLLM(createNewAgentPrompt(agentInfo, finalisedAgents, "Master User"), ".", 8000);
     console.log("LLM Response for CreateNewAgent:", response);
     try {
         const cleaned = response.replace(/```json|```/g, "").trim();
@@ -81,11 +81,12 @@ async function GenerateAgents(industryInfo, callLLM) {
 async function UpdateAgent(agentInfo, otherAgents, callLLM) {
     
     console.log(agentInfo)
-    const response = await callLLM(updateAgentPrompt(agentInfo, otherAgents), ".", 4000);
+    const response = await callLLM(updateAgentPrompt(agentInfo, otherAgents, "Master User"), ".", 4000);
     console.log("LLM Response for UpdateAgent:", response);
     try {
         const cleaned = response.replace(/```json|```/g, "").trim();
-        return JSON.parse(cleaned);
+        const parsed = JSON.parse(cleaned);
+        return parsed;
     } catch (e) {
         console.error("Could not parse UpdateAgent JSON:", e.message);
         return { can_update: false, reason: 'Could not parse LLM response. Please try again.', prompt: null, Explanation: null };
