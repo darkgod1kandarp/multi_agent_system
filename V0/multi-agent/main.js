@@ -774,33 +774,32 @@ async function main(url, emit = () => {}) {
     bench.end('chunk', { chunk_count: chunks.length });
     console.log(`\nChunks: ${chunks.length}`);
 
-    // ── 3. Embed ──────────────────────────────────────────────────────────────
+    // ── 3. Embed all chunks in parallel ──────────────────────────────────────
     emit({ type: 'step', step: 'embedding', message: `Building knowledge base (${chunks.length} chunks)...` });
     bench.start('embed');
-    const embeddings = [];
-    for (let i = 0; i < chunks.length; i++) {
-        process.stdout.write(`\r   Embedding: ${i + 1}/${chunks.length}`);
-        embeddings.push(await GenerateEmbedding(chunks[i]));
-    }
+    const embeddings = await Promise.all(chunks.map(chunk => GenerateEmbedding(chunk)));
     bench.end('embed', { chunk_count: chunks.length });
 
-    // ── 4. Qdrant setup ───────────────────────────────────────────────────────
-    let collectionName = uuid.v4();
+    // ── 4. db_save_group + qdrant_create_collection in parallel ───────────────
+    const collectionName = uuid.v4();
     const agentId = uuid.v4();
 
     bench.start('db_save_group');
-    await db.saveAgentGroup({ id: agentId, sourceUrl: url, qdrantCollection: collectionName });
-    bench.end('db_save_group');
-
     bench.start('qdrant_create_collection');
-    const exists = await CollectionExists(collectionName);
-    if (!exists) {
-        console.log(`\nCreating collection "${collectionName}"...`);
-        await CreateCollection(collectionName);
-    }
+    await Promise.all([
+        db.saveAgentGroup({ id: agentId, sourceUrl: url, qdrantCollection: collectionName }),
+        CollectionExists(collectionName).then(exists => {
+            if (!exists) {
+                console.log(`\nCreating collection "${collectionName}"...`);
+                return CreateCollection(collectionName);
+            }
+        }),
+    ]);
+    bench.end('db_save_group');
     bench.end('qdrant_create_collection');
 
-    // ── 5. Qdrant insert ──────────────────────────────────────────────────────
+    // ── 5. qdrant_insert + detect_industry in parallel ────────────────────────
+    // detect_industry uses raw chunks directly — no Qdrant round-trip needed
     const validPoints = chunks
         .map((chunk, index) => ({
             id: uuid.v4(),
@@ -809,20 +808,22 @@ async function main(url, emit = () => {}) {
         }))
         .filter(p => Array.isArray(p.vector) && p.vector.length > 0);
 
-    emit({ type: 'step', step: 'storing', message: 'Storing knowledge base...' });
-    bench.start('qdrant_insert');
-    await InsertBulkIntoQdrant(collectionName, validPoints);
-    bench.end('qdrant_insert', { points: validPoints.length });
-    console.log(`\nInserted ${validPoints.length} points into Qdrant`);
-
-    // ── 6. Detect industry ────────────────────────────────────────────────────
+    emit({ type: 'step', step: 'storing',   message: 'Storing knowledge base...' });
     emit({ type: 'step', step: 'detecting', message: 'Detecting industry...' });
+
+    bench.start('qdrant_insert');
     bench.start('detect_industry');
-    const industryInfo = await DetectIndustry(
-        async (query, topK) => await SearchQdrant(collectionName, query, topK),
-        CallLLM
-    );
-    bench.end('detect_industry');
+    const [, industryInfo] = await Promise.all([
+        InsertBulkIntoQdrant(collectionName, validPoints).then(r => {
+            bench.end('qdrant_insert', { points: validPoints.length });
+            console.log(`\nInserted ${validPoints.length} points into Qdrant`);
+            return r;
+        }),
+        DetectIndustry(chunks, CallLLM).then(r => {
+            bench.end('detect_industry');
+            return r;
+        }),
+    ]);
 
     const derivedCompanyName = industryInfo.company_name || deriveCompanyNameFromUrl(url);
     const normalizedIndustryInfo = {

@@ -1,12 +1,19 @@
 const { CallLLM } = require('../component/llm');
 const { agentConciusness, detectIndustryPrompt, generateAgentsSystemPrompt, generateSingleAgentUserPrompt, createNewAgentPrompt, updateAgentPrompt } = require('./prompt');
+const { uniqueNamesGenerator, adjectives, colors, animals } = require('unique-names-generator');
 
-async function DetectIndustry(searchQdrant, callLLM) {
-    console.log("\n Step 1: Detecting industry from Qdrant data...");
+async function DetectIndustry(searchQdrantOrChunks, callLLM) {
+    console.log("\n Step 1: Detecting industry...");
 
-    // Fetch a broad sample from Qdrant
-    const samples = await searchQdrant("company business products services overview about us", 10);
-    const context = samples.join("\n\n").slice(0, 4000);
+    // Accept either raw chunks array (faster, no Qdrant round-trip)
+    // or a searchQdrant function (legacy path)
+    let context;
+    if (Array.isArray(searchQdrantOrChunks)) {
+        context = searchQdrantOrChunks.join("\n\n").slice(0, 4000);
+    } else {
+        const samples = await searchQdrantOrChunks("company business products services overview about us", 10);
+        context = samples.join("\n\n").slice(0, 4000);
+    }
 
     const response = await callLLM(detectIndustryPrompt(context));
     try {
@@ -78,46 +85,97 @@ function tryParseAgent(response) {
     return parsed;
 }
 
-// Generates agents one by one — calls onAgent(agent) immediately after each is ready
+// Pre-generate N guaranteed-unique names using the library
+function preAssignUniqueNames(count) {
+    const used = new Set();
+    const names = [];
+    while (names.length < count) {
+        const candidate = uniqueNamesGenerator({
+            dictionaries: [adjectives, colors, animals],
+            separator: ' ',
+            style: 'capital',
+            length: 2,
+        });
+        if (!used.has(candidate)) {
+            used.add(candidate);
+            names.push(candidate);
+        }
+    }
+    return names;
+}
+
+// Generates all agents in parallel — calls onAgent(agent) as each one finishes
 async function GenerateAgents(industryInfo, callLLM, onAgent = null) {
-    const agents = [];
-    for (const entry of industryInfo.suggested_agents) {
+    // Pre-assign one unique name per agent — guaranteed no collisions, zero extra API calls
+    const preAssignedNames = preAssignUniqueNames(industryInfo.suggested_agents.length);
+
+    // Build full planned roster upfront so every agent knows its siblings
+    const plannedRoster = industryInfo.suggested_agents.map((entry, idx) => {
+        const r = resolveAgentEntry(entry);
+        return { name: preAssignedNames[idx], role: r.focus || r.name };
+    });
+
+    // Launch all agent generations in parallel
+    const promises = industryInfo.suggested_agents.map(async (entry, idx) => {
         const agentEntry = resolveAgentEntry(entry);
-        console.log(`\n Generating agent: "${agentEntry.name}"...`);
+        const assignedName = preAssignedNames[idx];
+        console.log(`\n[Parallel] Generating agent: "${agentEntry.name}" → pre-assigned name "${assignedName}"...`);
+
+        // Each agent sees all OTHER planned agents for scope deconfliction
+        const otherAgents = plannedRoster.filter((_, i) => i !== idx);
+
+        const nameInstruction = `\nYou MUST use this exact name for the agent: "${assignedName}". Do NOT choose a different name.`;
 
         let parsed = null;
 
-        // Attempt 1: normal call with 6000 tokens
+        // Attempt 1: 6000 tokens
         try {
             const response = await callLLM(
                 generateAgentsSystemPrompt,
-                generateSingleAgentUserPrompt(agentEntry, industryInfo, agents),
+                generateSingleAgentUserPrompt(agentEntry, industryInfo, otherAgents) + nameInstruction,
                 6000
             );
             parsed = tryParseAgent(response);
         } catch (e) {
-            console.warn(`[Attempt 1] Could not parse agent "${agentEntry.name}": ${e.message} — retrying with shorter prompt...`);
+            console.warn(`[Attempt 1] "${assignedName}": ${e.message} — retrying...`);
         }
 
-        // Attempt 2: retry with explicit brevity instruction
+        // Attempt 2: retry with explicit brevity instruction + more tokens
         if (!parsed) {
             try {
-                const retryUserPrompt = generateSingleAgentUserPrompt(agentEntry, industryInfo, agents)
-                    + `\n\nIMPORTANT: Your previous response was too long and got cut off. This time keep ALL text fields (identity, task, prompt, Explanation) SHORT — under 80 words each. The JSON MUST be complete and valid.`;
-                const retryResponse = await callLLM(generateAgentsSystemPrompt, retryUserPrompt, 8000);
+                const retryPrompt = generateSingleAgentUserPrompt(agentEntry, industryInfo, otherAgents)
+                    + nameInstruction
+                    + `\n\nIMPORTANT: Previous response was too long and got cut off. Keep ALL text fields under 80 words each. JSON MUST be complete and valid.`;
+                const retryResponse = await callLLM(generateAgentsSystemPrompt, retryPrompt, 8000);
                 parsed = tryParseAgent(retryResponse);
-                console.log(`[Attempt 2] Successfully parsed agent "${agentEntry.name}"`);
+                console.log(`[Attempt 2] Parsed "${assignedName}" successfully`);
             } catch (e2) {
-                console.error(`[Attempt 2] Still could not parse agent "${agentEntry.name}": ${e2.message} — skipping.`);
+                console.error(`[Attempt 2] Failed for "${assignedName}": ${e2.message} — skipping.`);
             }
         }
 
-        if (parsed) {
-            agents.push(parsed);
-            if (onAgent) onAgent(parsed);
+        // Enforce the pre-assigned name even if the LLM ignored the instruction
+        if (parsed && parsed.name !== assignedName) {
+            console.warn(`[Name] LLM used "${parsed.name}" instead of "${assignedName}" — overriding.`);
+            parsed.name = assignedName;
         }
+
+        return { idx, parsed };
+    });
+
+    // Wait for all to complete, preserve original order
+    const results = await Promise.all(promises);
+    const finalAgents = results
+        .sort((a, b) => a.idx - b.idx)
+        .map(r => r.parsed)
+        .filter(Boolean);
+
+    // Stream to frontend in order
+    for (const agent of finalAgents) {
+        if (onAgent) onAgent(agent);
     }
-    return agents;
+
+    return finalAgents;
 }
 
 async function UpdateAgent(agentInfo, otherAgents, callLLM) {
