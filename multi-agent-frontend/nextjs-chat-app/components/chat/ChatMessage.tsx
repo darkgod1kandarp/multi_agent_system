@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Agent } from './ChatWindow';
 import { useUser } from '../UserContext';
 import { fetchWithTimeout } from '../../lib/fetchWithTimeout';
 
-const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
 interface ChatMessageProps {
     sender: string;
@@ -14,6 +14,8 @@ interface ChatMessageProps {
     agents?: Agent[];
     groupId?: string;
     isError?: boolean;
+    isStreaming?: boolean;
+    streamStep?: string;
 }
 
 interface TestResult {
@@ -104,7 +106,7 @@ const TestResultBanner = ({ result }: { result: TestResult }) => {
 
 // ─── ChatMessage ────────────────────────────────────────────────────────────
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, groupId, isError }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, groupId, isError, isStreaming, streamStep }) => {
     const isUser = sender === 'User';
     const router = useRouter();
     const { user, isMaster } = useUser();
@@ -112,6 +114,11 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
     const [explanations, setExplanations] = useState<string[]>(
         () => (agents ?? []).map(resolveExplanation)
     );
+
+    // Sync explanations when new agents are appended during streaming
+    useEffect(() => {
+        setExplanations((agents ?? []).map(resolveExplanation));
+    }, [agents?.length]);
     const [removedIndices, setRemovedIndices] = useState<Set<number>>(new Set());
     const [customAgents, setCustomAgents] = useState<Agent[]>([]);
     const [customExplanations, setCustomExplanations] = useState<string[]>([]);
@@ -242,41 +249,51 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                     fontSize: '14px', lineHeight: '1.65', wordBreak: 'break-word',
                     background: isUser ? 'linear-gradient(135deg,#4f7fff 0%,#9c4fff 100%)' : isError ? 'rgba(239,68,68,0.1)' : 'rgba(26,32,53,0.95)',
                     color: '#f1f3f9',
-                    border: isUser ? 'none' : isError ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(255,255,255,0.07)',
+                    border: isUser ? 'none' : isError ? '1px solid rgba(239,68,68,0.3)' : isStreaming ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.07)',
                     boxShadow: isUser ? '0 6px 24px rgba(99,102,241,0.35)' : '0 4px 16px rgba(0,0,0,0.3)',
                 }}>
                     <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '5px', opacity: 0.65, color: isUser ? '#e0e7ff' : isError ? '#f87171' : '#818cf8' }}>
                         {sender}
                     </div>
-                    {message}
+                    {isStreaming ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ width: 10, height: 10, border: '2px solid rgba(99,102,241,0.3)', borderTopColor: '#818cf8', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+                            <span style={{ color: 'rgba(180,190,230,0.75)', fontSize: '13px' }}>{streamStep || 'Working...'}</span>
+                        </div>
+                    ) : (
+                        message
+                    )}
                 </div>
 
                 {/* Agent cards */}
-                {agents && agents.length > 0 && (
+                {(agents && agents.length > 0 || isStreaming) && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
                         {/* Header row */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: '2px' }}>
-                            <span style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'rgba(129,140,248,0.6)' }}>
-                                {allAgents.length} Agent{allAgents.length !== 1 ? 's' : ''} Generated
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'rgba(129,140,248,0.6)' }}>
+                                {allAgents.length} Agent{allAgents.length !== 1 ? 's' : ''} {isStreaming ? 'Creating...' : 'Generated'}
+                                {isStreaming && (
+                                    <span style={{ width: 8, height: 8, border: '2px solid rgba(99,102,241,0.3)', borderTopColor: '#818cf8', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
+                                )}
                             </span>
 
                             {/* Finalize All button — master only */}
                             {!finalizedAll ? (
                                 <button
                                     onClick={handleFinalizeAll}
-                                    disabled={finalizeAllLoading || !isMaster}
+                                    disabled={finalizeAllLoading || !isMaster || isStreaming}
                                     title={!isMaster ? 'Only master users can finalize agents' : undefined}
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: '6px',
-                                        background: (!isMaster || finalizeAllLoading) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg,#4f7fff,#9c4fff)',
+                                        background: (!isMaster || finalizeAllLoading || isStreaming) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg,#4f7fff,#9c4fff)',
                                         border: 'none', borderRadius: '8px',
                                         padding: '6px 14px', color: '#fff',
                                         fontSize: '12px', fontWeight: 600,
-                                        cursor: (!isMaster || finalizeAllLoading) ? 'not-allowed' : 'pointer',
+                                        cursor: (!isMaster || finalizeAllLoading || isStreaming) ? 'not-allowed' : 'pointer',
                                         fontFamily: 'inherit',
-                                        opacity: (!isMaster || finalizeAllLoading) ? 0.5 : 1,
-                                        boxShadow: (!isMaster || finalizeAllLoading) ? 'none' : '0 3px 14px rgba(99,102,241,0.4)',
+                                        opacity: (!isMaster || finalizeAllLoading || isStreaming) ? 0.5 : 1,
+                                        boxShadow: (!isMaster || finalizeAllLoading || isStreaming) ? 'none' : '0 3px 14px rgba(99,102,241,0.4)',
                                     }}
                                 >
                                     {finalizeAllLoading ? (

@@ -40,18 +40,18 @@ load_dotenv("crawler/.env")
 #     exit(1)
 
 
-import boto3
+# import boto3
 
-runtime = boto3.client("bedrock-runtime", region_name="us-east-1")
+# runtime = boto3.client("bedrock-runtime", region_name="us-east-1")
 
-model_id = "us.anthropic.claude-sonnet-4-20250514-v1:0"  # example profile ID
-# OR model_id = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/..."
+# model_id = "us.anthropic.claude-sonnet-4-20250514-v1:0"  # example profile ID
+# # OR model_id = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/..."
 
-resp = runtime.converse(
-    modelId=model_id,
-    messages=[{"role": "user", "content": [{"text": "Okay now we are testing you"}]}],
-)
-print(resp["output"]["message"]["content"][0]["text"])
+# resp = runtime.converse(
+#     modelId=model_id,
+#     messages=[{"role": "user", "content": [{"text": "Okay now we are testing you"}]}],
+# )
+# print(resp["output"]["message"]["content"][0]["text"])
 
 
 

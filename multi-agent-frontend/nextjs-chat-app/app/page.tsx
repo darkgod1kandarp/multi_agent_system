@@ -6,7 +6,7 @@ import { useUser } from '../components/UserContext';
 import { useRouter } from 'next/navigation';
 import { fetchWithTimeout } from '../lib/fetchWithTimeout';
 
-const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
 const Page = () => {
     const { user, setUser, isMaster } = useUser();

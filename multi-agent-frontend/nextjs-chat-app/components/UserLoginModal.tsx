@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useUser, User } from './UserContext';
 import { fetchWithTimeout } from '../lib/fetchWithTimeout';
 
-const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 const HEADERS = { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' };
 
 interface UserRecord {

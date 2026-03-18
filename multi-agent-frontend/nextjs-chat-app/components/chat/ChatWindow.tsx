@@ -22,9 +22,11 @@ export interface Message {
     groupId?: string;
     isError?: boolean;
     isLoading?: boolean;
+    isStreaming?: boolean;
+    streamStep?: string;
 }
 
-const BACKEND_URL = 'https://unbeautified-robbi-nonaffecting.ngrok-free.dev';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
 const hasURL = (text: string) => /(https?:\/\/[^\s]+)/g.test(text);
 
@@ -58,28 +60,94 @@ const ChatWindow = () => {
                     setLoading(false);
                     return;
                 }
-                const res = await fetchWithTimeout(`${BACKEND_URL}/creating/agent`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
-                    body: JSON.stringify({ message: userMessage }),
-                });
-                const data = await res.json();
-                if (!res.ok) {
-                    setMessages(prev => [...prev, {
-                        sender: 'AI',
-                        message: data.error || 'Something went wrong generating agents.',
-                        isError: true,
-                    }]);
-                } else {
-                    const agents: Agent[] = Array.isArray(data.agents) ? data.agents : [];
-                    setMessages(prev => [...prev, {
-                        sender: 'AI',
-                        message: agents.length > 0
-                            ? `I've analyzed the website and generated ${agents.length} AI agent${agents.length !== 1 ? 's' : ''} for you.`
-                            : 'Analysis complete — no agents were returned.',
-                        agents: agents.length > 0 ? agents : undefined,
-                        groupId: data.id,
-                    }]);
+
+                // Add a streaming placeholder message immediately
+                setMessages(prev => [...prev, {
+                    sender: 'AI',
+                    message: '',
+                    isStreaming: true,
+                    streamStep: 'Connecting...',
+                    agents: [],
+                    groupId: '',
+                }]);
+                setLoadingMode('chat'); // hide bottom spinner — streaming message shows progress
+
+                let streamEnded = false;
+                try {
+                    const res = await fetch(`${BACKEND_URL}/creating/agent/stream`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-user-id': user?.id ?? '' },
+                        body: JSON.stringify({ message: userMessage }),
+                    });
+
+                    if (!res.ok) {
+                        const errData = await res.json().catch(() => ({}));
+                        setMessages(prev => [
+                            ...prev.slice(0, -1),
+                            { sender: 'AI', message: errData.error || 'Something went wrong generating agents.', isError: true },
+                        ]);
+                        return;
+                    }
+
+                    const reader = res.body!.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() ?? '';
+
+                        for (const line of lines) {
+                            if (!line.startsWith('data: ')) continue;
+                            let event: Record<string, unknown>;
+                            try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+                            if (event.type === 'step') {
+                                setMessages(prev => {
+                                    const last = { ...prev[prev.length - 1] };
+                                    last.streamStep = event.message as string;
+                                    return [...prev.slice(0, -1), last];
+                                });
+                            } else if (event.type === 'agent') {
+                                setMessages(prev => {
+                                    const last = { ...prev[prev.length - 1] };
+                                    last.agents = [...(last.agents ?? []), event.agent as Agent];
+                                    return [...prev.slice(0, -1), last];
+                                });
+                            } else if (event.type === 'done') {
+                                streamEnded = true;
+                                setMessages(prev => {
+                                    const last = { ...prev[prev.length - 1] };
+                                    const count = last.agents?.length ?? 0;
+                                    return [...prev.slice(0, -1), {
+                                        ...last,
+                                        isStreaming: false,
+                                        streamStep: undefined,
+                                        message: count > 0
+                                            ? `I've analyzed the website and generated ${count} AI agent${count !== 1 ? 's' : ''} for you.`
+                                            : 'Analysis complete — no agents were returned.',
+                                        groupId: event.id as string,
+                                    }];
+                                });
+                            } else if (event.type === 'error') {
+                                setMessages(prev => [
+                                    ...prev.slice(0, -1),
+                                    { sender: 'AI', message: (event.message as string) || 'Something went wrong.', isError: true },
+                                ]);
+                            }
+                        }
+                    }
+                } catch {
+                    if (!streamEnded) {
+                        setMessages(prev => [
+                            ...prev.slice(0, -1),
+                            { sender: 'AI', message: '⚠ Could not reach the backend server. Make sure it is running on port 3001.', isError: true },
+                        ]);
+                    }
                 }
             } else {
                 // ── General chat: POST /chat ──
@@ -216,12 +284,14 @@ const ChatWindow = () => {
                             agents={msg.agents}
                             groupId={msg.groupId}
                             isError={msg.isError}
+                            isStreaming={msg.isStreaming}
+                            streamStep={msg.streamStep}
                         />
                     ))
                 )}
 
-                {/* Loading indicator */}
-                {loading && (
+                {/* Loading indicator — only show when NOT streaming (streaming message shows its own progress) */}
+                {loading && !messages.some(m => m.isStreaming) && (
                     <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px' }}>
                         <div style={{
                             width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
