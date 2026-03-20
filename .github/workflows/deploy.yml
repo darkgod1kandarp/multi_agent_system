@@ -3,7 +3,7 @@ name: Deploy to EC2
 on:
   push:
     branches: [main]
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -20,16 +20,27 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd /var/www/myapp/multi_agent_system/V0/multi-agent
+            # Load Node.js
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            
+            cd /var/www/myapp
             
             # Pull latest code
             git pull origin main
             
-            # Install dependencies
-            npm ci --production
+            # ===== BACKEND (Node.js) =====
+            cd /var/www/myapp/V0/multi-agent
+            npm install
+            pm2 delete backend 2>/dev/null || true
+            pm2 start main.js --name backend
             
-            # Restart application
-            pm2 restart ecosystem.config.js --env production || pm2 start ecosystem.config.js --env production
+            # ===== FRONTEND (Next.js) =====
+            cd /var/www/myapp/multi-agent-frontend/nextjs-chat-app
+            npm install
+            npm run build
+            pm2 delete frontend 2>/dev/null || true
+            pm2 start npm --name frontend -- start
             
-            # Save PM2 process list
+            # Save PM2 processes
             pm2 save
