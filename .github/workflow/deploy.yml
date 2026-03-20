@@ -1,0 +1,35 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /var/www/myapp
+            
+            # Pull latest code
+            git pull origin main
+            
+            # Install dependencies
+            npm ci --production
+            
+            # Restart application
+            pm2 restart ecosystem.config.js --env production || pm2 start ecosystem.config.js --env production
+            
+            # Save PM2 process list
+            pm2 save
