@@ -36,7 +36,7 @@ jobs:
             pm2 start main.js --name backend
             
             # ===== FRONTEND (Next.js) =====
-            cd /var/www/myapp/multi-agent-frontend/nextjs-chat-app
+            cd /var/www/myapp/multi_agent_system/multi-agent-frontend/nextjs-chat-app
             npm install
             npm run build
             pm2 delete frontend 2>/dev/null || true
