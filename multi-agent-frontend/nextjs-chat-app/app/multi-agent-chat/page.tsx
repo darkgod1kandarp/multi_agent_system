@@ -14,6 +14,23 @@ interface Agent {
     explanation?: string;
 }
 
+interface LeadResult {
+    email: string;
+    name?: string;
+    company?: string;
+    status: 'sent' | 'failed';
+    error?: string;
+}
+
+interface AppNotification {
+    id: string;
+    type: string;
+    title: string;
+    body: string;
+    data: { sent: LeadResult[] };
+    timestamp: number;
+}
+
 interface ChatMessage {
     role: 'user' | 'agent' | 'routing';
     content: string;
@@ -22,6 +39,7 @@ interface ChatMessage {
     intentUnderstood?: string;
     action?: string | null;
     isClarifying?: boolean;
+    leadResults?: LeadResult[];
 }
 
 interface PendingContext {
@@ -56,6 +74,7 @@ export default function MultiAgentChatPage() {
     const [groupId, setGroupId] = useState<string | null>(null);
     const [pendingContext, setPendingContext] = useState<PendingContext | null>(null);
     const [inputFocused, setInputFocused] = useState(false);
+    const [toasts, setToasts] = useState<AppNotification[]>([]);
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -74,6 +93,34 @@ export default function MultiAgentChatPage() {
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, loading, routingTo]);
+
+    // Poll for background task notifications every 4 seconds
+    useEffect(() => {
+        if (!groupId) return;
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`${BACKEND_URL}/notifications?groupId=${groupId}`);
+                const data = await res.json();
+                if (data.notifications?.length) {
+                    setToasts(prev => [...prev, ...data.notifications]);
+                    // Also append lead results as a chat message
+                    data.notifications.forEach((n: AppNotification) => {
+                        if (n.data?.sent?.length) {
+                            setMessages(prev => [...prev, {
+                                role: 'agent',
+                                content: n.body,
+                                agentName: 'System',
+                                agentRole: 'Notification',
+                                action: 'send_lead_emails',
+                                leadResults: n.data.sent,
+                            }]);
+                        }
+                    });
+                }
+            } catch { /* ignore poll errors */ }
+        }, 4000);
+        return () => clearInterval(interval);
+    }, [groupId]);
 
     const agentColor = (name: string) => {
         const idx = agents.findIndex(a => a.name === name);
@@ -130,6 +177,7 @@ export default function MultiAgentChatPage() {
                     agentRole: data.agent?.role,
                     intentUnderstood: isMetaAgent ? undefined : data.intent_understood,
                     action: isMetaAgent ? undefined : data.action,
+                    leadResults: data.lead_results?.length ? data.lead_results : undefined,
                 }]);
             }
         } catch (err: unknown) {
@@ -406,6 +454,63 @@ export default function MultiAgentChatPage() {
                                             )}
                                         </div>
                                     )}
+
+                                    {msg.leadResults && msg.leadResults.length > 0 && (
+                                        <div style={{
+                                            marginTop: '8px',
+                                            borderRadius: '12px',
+                                            border: '1px solid rgba(73,182,132,0.2)',
+                                            background: 'rgba(7,25,41,0.7)',
+                                            overflow: 'hidden',
+                                        }}>
+                                            <div style={{
+                                                padding: '8px 14px',
+                                                borderBottom: '1px solid rgba(73,182,132,0.12)',
+                                                fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px',
+                                                textTransform: 'uppercase', color: '#49B684',
+                                                display: 'flex', alignItems: 'center', gap: '6px',
+                                            }}>
+                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+                                                </svg>
+                                                Lead Outreach — {msg.leadResults.filter(r => r.status === 'sent').length} of {msg.leadResults.length} sent
+                                            </div>
+                                            {msg.leadResults.map((lead, li) => (
+                                                <div key={li} style={{
+                                                    display: 'flex', alignItems: 'center', gap: '10px',
+                                                    padding: '8px 14px',
+                                                    borderBottom: li < msg.leadResults!.length - 1 ? '1px solid rgba(73,182,132,0.07)' : 'none',
+                                                }}>
+                                                    <div style={{
+                                                        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                                                        background: lead.status === 'sent' ? '#49B684' : '#ef4444',
+                                                        boxShadow: `0 0 6px ${lead.status === 'sent' ? 'rgba(73,182,132,0.6)' : 'rgba(239,68,68,0.6)'}`,
+                                                    }} />
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#EDF2F7', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                            {lead.name || lead.email}
+                                                        </div>
+                                                        {lead.company && (
+                                                            <div style={{ fontSize: '11px', color: 'rgba(180,205,225,0.4)' }}>{lead.company}</div>
+                                                        )}
+                                                    </div>
+                                                    <div style={{ fontSize: '11px', color: 'rgba(180,205,225,0.35)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                                        {lead.email}
+                                                    </div>
+                                                    <div style={{
+                                                        fontSize: '9px', fontWeight: 700, letterSpacing: '0.5px',
+                                                        padding: '2px 7px', borderRadius: '20px', flexShrink: 0,
+                                                        textTransform: 'uppercase',
+                                                        background: lead.status === 'sent' ? 'rgba(73,182,132,0.15)' : 'rgba(239,68,68,0.15)',
+                                                        color: lead.status === 'sent' ? '#49B684' : '#f87171',
+                                                        border: `1px solid ${lead.status === 'sent' ? 'rgba(73,182,132,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                                                    }}>
+                                                        {lead.status}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         );
@@ -457,11 +562,65 @@ export default function MultiAgentChatPage() {
                         </div>
                     )}
 
-                    <style>{`@keyframes bounce { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }`}</style>
+                    <style>{`@keyframes bounce { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} } @keyframes slideIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }`}</style>
                     <div ref={bottomRef} />
                 </div>
             </div>
 
+            {/* ── Toast notifications ── */}
+            <div style={{
+                position: 'fixed', top: '70px', right: '20px',
+                display: 'flex', flexDirection: 'column', gap: '10px',
+                zIndex: 1000, maxWidth: '340px',
+            }}>
+                {toasts.map(toast => (
+                    <div key={toast.id} style={{
+                        background: '#0D2D4B',
+                        border: `1px solid ${toast.type === 'lead_emails_failed' ? 'rgba(239,68,68,0.4)' : 'rgba(73,182,132,0.4)'}`,
+                        borderRadius: '12px',
+                        padding: '14px 16px',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                        display: 'flex', flexDirection: 'column', gap: '4px',
+                        animation: 'slideIn 0.25s ease',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{
+                                fontSize: '12px', fontWeight: 700,
+                                color: toast.type === 'lead_emails_failed' ? '#f87171' : '#49B684',
+                                display: 'flex', alignItems: 'center', gap: '6px',
+                            }}>
+                                {toast.type === 'lead_emails_failed' ? '✕' : '✓'} {toast.title}
+                            </div>
+                            <button onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))} style={{
+                                background: 'none', border: 'none', color: 'rgba(180,205,225,0.3)',
+                                cursor: 'pointer', fontSize: '14px', padding: '0 0 0 8px', lineHeight: 1,
+                            }}>✕</button>
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'rgba(180,205,225,0.6)', lineHeight: 1.5 }}>
+                            {toast.body}
+                        </div>
+                        {toast.data?.sent?.length > 0 && (
+                            <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {toast.data.sent.slice(0, 3).map((l, i) => (
+                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
+                                        <div style={{
+                                            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                                            background: l.status === 'sent' ? '#49B684' : '#ef4444',
+                                        }} />
+                                        <span style={{ color: '#EDF2F7', fontWeight: 600 }}>{l.name || l.email}</span>
+                                        {l.company && <span style={{ color: 'rgba(180,205,225,0.4)' }}>· {l.company}</span>}
+                                    </div>
+                                ))}
+                                {toast.data.sent.length > 3 && (
+                                    <div style={{ fontSize: '11px', color: 'rgba(180,205,225,0.3)' }}>
+                                        +{toast.data.sent.length - 3} more
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
             {/* ── Input bar ── */}
             <div style={{
                 padding: '12px 24px 16px',

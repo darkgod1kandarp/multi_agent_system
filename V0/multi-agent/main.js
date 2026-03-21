@@ -2,6 +2,7 @@ const axios = require("axios");
 const { runFireCrawl } = require('./component/firecrawl');  
 const { GenerateEmbedding, CreateCollection, CollectionExists, InsertBulkIntoQdrant, SearchQdrant} = require('./component/qdrant_db');
 const { sendQuotationEmail } = require('./component/mailer');
+const { sendLeadEmails } = require('./component/lead-mailer');
 const dotenv = require('dotenv');
 const uuid = require('uuid');
 const { llm } = require('./component/llm');
@@ -26,6 +27,10 @@ const { TestAndFixAgent } = require('./component/testing');
 const { runMetaAgent }   = require('./component/meta_agent');
 const { ostring } = require("zod/v3");
 const USING_SUPABASE = Boolean(process.env.SUPABASE_URL);
+
+// ── In-memory notification store ──────────────────────────────────────────────
+// groupId → [{ id, type, title, body, data, timestamp }]
+const notifications = {};
 
 // Middleware: only master users can perform this action
 async function requireMasterUser(req, res, next) {
@@ -535,11 +540,22 @@ Return ONLY valid JSON:
   "missing_description": "<if ready=false: plain English>",
   "question_for_orchestrator": "<if ready=false: question in English>",
   "intent_understood": "<one sentence in English>",
-  "action": null | "schedule" | "collect_info" | "follow_up" | "provide_info" | "send_quotation",
-    "action_data": {
-  // when send_quotation: email, customer_name, items[], total_amount, valid_until, notes
-    }
-}`;
+  "action": null | "schedule" | "collect_info" | "follow_up" | "provide_info" | "send_quotation" | "send_lead_emails",
+  "action_data": {
+    "email": "<customer email, only for send_quotation>",
+    "customer_name": "<customer name, only for send_quotation>",
+    "items": [{ "description": "<item name>", "qty": <number>, "price": "<e.g. ₹5000, or 'To be discussed' if unknown>" }],
+    "total_amount": "<e.g. ₹15000>",
+    "valid_until": "<date or empty string>",
+    "notes": "<any extra notes or empty string>",
+    "query": "<Google search query to find target companies/leads, only for send_lead_emails — use this when user describes a type of business or location instead of a specific URL>",
+    "url": "<specific website URL, only for send_lead_emails — use this only when the user provides an exact URL>",
+    "intent": "<what to communicate in the outreach email, only for send_lead_emails>",
+    "subject": "<email subject line, only for send_lead_emails>"
+  }
+}
+
+When the user wants to reach out to leads: if they give a specific URL set url, if they describe a business type or location set query (e.g. "crane companies in Mumbai" → query: "crane rental companies Mumbai contact email"). Always set action to "send_lead_emails".`;
         };
 
         // ── 8. Fan-out loop ───────────────────────────────────────────────────
@@ -667,7 +683,6 @@ Return ONLY valid JSON — no extra text:
                         console.error('[Email] Failed to send quotation:', e.message);
                     }
                     
-                    //  We also need to add the response has been sent
                     return res.json({
                         status          : 'complete',
                         response        : agentCheck.response + `\n\n(Note: A quotation email has been sent to ${agentCheck.action_data.email})`,
@@ -677,10 +692,57 @@ Return ONLY valid JSON — no extra text:
                         agent           : { name: selectedAgent.name, role: selectedAgent.role },
                         intent          : message,
                         iterations      : iteration + 1,
-                        
-
                     });
                 }
+
+                if (agentCheck.action === 'send_lead_emails' && (agentCheck.action_data?.url || agentCheck.action_data?.query)) {
+                    // Respond immediately — run email job in background
+                    res.json({
+                        status           : 'complete',
+                        response         : agentCheck.response + '\n\n(Working on it in the background — I\'ll notify you once the emails are sent. Feel free to keep chatting!)',
+                        intent_understood: agentCheck.intent_understood || message,
+                        action           : agentCheck.action,
+                        action_data      : agentCheck.action_data || {},
+                        lead_results     : [],
+                        agent            : { name: selectedAgent.name, role: selectedAgent.role },
+                        intent           : message,
+                        iterations       : iteration + 1,
+                    });
+
+                    // Fire and forget
+                    sendLeadEmails({
+                        query         : agentCheck.action_data.query || '',
+                        url           : agentCheck.action_data.url   || '',
+                        intent        : agentCheck.action_data.intent || message,
+                        subject       : agentCheck.action_data.subject || '',
+                        senderName    : selectedAgent.name,
+                        senderCompany : companyName || 'Our Company',
+                    }).then(result => {
+                        if (!notifications[groupId]) notifications[groupId] = [];
+                        notifications[groupId].push({
+                            id        : uuid.v4(),
+                            type      : 'lead_emails_done',
+                            title     : 'Lead Outreach Complete',
+                            body      : result.message,
+                            data      : { sent: result.sent },
+                            timestamp : Date.now(),
+                        });
+                        console.log(`[LeadMailer] Background job done for group ${groupId}: ${result.message}`);
+                    }).catch(e => {
+                        if (!notifications[groupId]) notifications[groupId] = [];
+                        notifications[groupId].push({
+                            id        : uuid.v4(),
+                            type      : 'lead_emails_failed',
+                            title     : 'Lead Outreach Failed',
+                            body      : e.message,
+                            data      : { sent: [] },
+                            timestamp : Date.now(),
+                        });
+                        console.error('[LeadMailer] Background job failed:', e.message);
+                    });
+                    return;
+                }
+
                 return res.json({
                     status          : 'complete',
                     response        : agentCheck.response,
@@ -1075,6 +1137,37 @@ async function main(url, emit = () => {}) {
     return { id: agentId, agents };
 }
 
+
+// ── Lead outreach: scrape website → extract emails → send personalised emails ──
+app.post("/lead/send", async (req, res) => {
+    const { query, url, intent, subject, senderName, senderCompany } = req.body;
+    if (!query && !url) return res.status(400).json({ error: 'query or url is required' });
+    if (!intent)        return res.status(400).json({ error: 'intent is required (what you want to communicate)' });
+
+    try {
+        const result = await sendLeadEmails({
+            query:         query         || '',
+            url:           url           || '',
+            intent,
+            subject:       subject       || '',
+            senderName:    senderName    || 'The Team',
+            senderCompany: senderCompany || '',
+        });
+        res.json(result);
+    } catch (e) {
+        console.error('[/lead/send]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ── Notifications: frontend polls this to get background task results ──────────
+app.get("/notifications", (req, res) => {
+    const { groupId } = req.query;
+    if (!groupId) return res.status(400).json({ error: 'groupId is required' });
+    const pending = notifications[groupId] || [];
+    notifications[groupId] = []; // clear after delivering
+    res.json({ notifications: pending });
+});
 
 app.get("/chat/history", async (req, res) => {
     const { groupId, limit } = req.query;
