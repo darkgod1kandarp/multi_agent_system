@@ -41,6 +41,6 @@ jobs:
             npm run build
             pm2 delete frontend 2>/dev/null || true
             pm2 start npm --name frontend -- start
-            
+        
             # Save PM2 processes
             pm2 save

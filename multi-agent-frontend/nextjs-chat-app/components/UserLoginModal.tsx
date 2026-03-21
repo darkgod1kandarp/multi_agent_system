@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useUser, User } from './UserContext';
 import { fetchWithTimeout } from '../lib/fetchWithTimeout';
 
@@ -90,32 +90,31 @@ export default function UserLoginModal() {
     return (
         <div style={{
             position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(5,8,16,0.92)',
+            background: 'rgba(4,12,22,0.95)',
             backdropFilter: 'blur(8px)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: "'Inter', -apple-system, sans-serif",
         }}>
             <div style={{
-                background: 'rgba(15,20,35,0.98)',
-                border: '1px solid rgba(99,102,241,0.3)',
+                background: '#0D2D4B',
+                border: '1px solid rgba(73,182,132,0.3)',
                 borderRadius: '20px',
                 padding: '36px 32px',
                 width: '100%',
                 maxWidth: '420px',
-                boxShadow: '0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(99,102,241,0.1)',
+                boxShadow: '0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(73,182,132,0.1)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '24px',
             }}>
                 {/* Logo + title */}
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                        width: 52, height: 52, borderRadius: '14px',
-                        background: 'linear-gradient(135deg, #4f7fff, #9c4fff)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '22px', fontWeight: 800, color: '#fff',
-                        boxShadow: '0 8px 24px rgba(99,102,241,0.45)',
-                    }}>V</div>
+                    <img
+                        src="/logo.png"
+                        alt="Vomyra"
+                        style={{ height: 56, width: 'auto', objectFit: 'contain' }}
+                        onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    />
                     <div style={{ textAlign: 'center' }}>
                         <div style={{ fontSize: '20px', fontWeight: 700, color: '#f1f3f9' }}>Welcome to Vomyra AI</div>
                         <div style={{ fontSize: '13px', color: 'rgba(241,243,249,0.45)', marginTop: '4px' }}>
@@ -157,8 +156,8 @@ export default function UserLoginModal() {
                                             textAlign: 'left',
                                         }}
                                         onMouseEnter={e => {
-                                            (e.currentTarget as HTMLButtonElement).style.background = u.role === 'master' ? 'rgba(168,85,247,0.12)' : 'rgba(99,102,241,0.12)';
-                                            (e.currentTarget as HTMLButtonElement).style.borderColor = u.role === 'master' ? 'rgba(168,85,247,0.4)' : 'rgba(99,102,241,0.4)';
+                                            (e.currentTarget as HTMLButtonElement).style.background = u.role === 'master' ? 'rgba(73,182,132,0.12)' : 'rgba(73,182,132,0.12)';
+                                            (e.currentTarget as HTMLButtonElement).style.borderColor = u.role === 'master' ? 'rgba(73,182,132,0.4)' : 'rgba(73,182,132,0.4)';
                                         }}
                                         onMouseLeave={e => {
                                             (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.04)';
@@ -170,10 +169,10 @@ export default function UserLoginModal() {
                                             width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
                                             background: u.role === 'master'
                                                 ? 'linear-gradient(135deg, #a855f7, #ec4899)'
-                                                : 'linear-gradient(135deg, #4f7fff, #9c4fff)',
+                                                : 'linear-gradient(135deg, #49B684, #2a9d7a)',
                                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                                             fontSize: '13px', fontWeight: 700, color: '#fff',
-                                            boxShadow: u.role === 'master' ? '0 2px 8px rgba(168,85,247,0.4)' : '0 2px 8px rgba(99,102,241,0.35)',
+                                            boxShadow: u.role === 'master' ? '0 2px 8px rgba(168,85,247,0.4)' : '0 2px 8px rgba(73,182,132,0.35)',
                                         }}>
                                             {u.username.charAt(0).toUpperCase()}
                                         </div>
@@ -188,9 +187,9 @@ export default function UserLoginModal() {
                                         <div style={{
                                             fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px',
                                             padding: '3px 9px', borderRadius: '20px', flexShrink: 0,
-                                            background: u.role === 'master' ? 'rgba(168,85,247,0.18)' : 'rgba(99,102,241,0.15)',
-                                            color: u.role === 'master' ? '#c084fc' : '#818cf8',
-                                            border: `1px solid ${u.role === 'master' ? 'rgba(168,85,247,0.35)' : 'rgba(99,102,241,0.3)'}`,
+                                            background: u.role === 'master' ? 'rgba(73,182,132,0.15)' : 'rgba(73,182,132,0.15)',
+                                            color: u.role === 'master' ? '#49B684' : '#49B684',
+                                            border: `1px solid ${u.role === 'master' ? 'rgba(73,182,132,0.3)' : 'rgba(73,182,132,0.3)'}`,
                                             textTransform: 'uppercase',
                                         }}>
                                             {u.role === 'master' ? '★ Master' : 'Normal'}
@@ -209,7 +208,7 @@ export default function UserLoginModal() {
                                                 background: 'rgba(168,85,247,0.1)',
                                                 border: '1px solid rgba(168,85,247,0.3)',
                                                 borderRadius: '8px',
-                                                color: '#c084fc',
+                                                color: '#49B684',
                                                 fontSize: '11px', fontWeight: 700,
                                                 cursor: promoting === u.username ? 'not-allowed' : 'pointer',
                                                 fontFamily: 'inherit',
@@ -262,7 +261,7 @@ export default function UserLoginModal() {
                             disabled={!newUsername.trim() || creating}
                             style={{
                                 padding: '11px 18px',
-                                background: (!newUsername.trim() || creating) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg, #4f7fff, #9c4fff)',
+                                background: (!newUsername.trim() || creating) ? 'rgba(73,182,132,0.15)' : 'linear-gradient(135deg, #49B684, #2a9d7a)',
                                 border: 'none',
                                 borderRadius: '10px',
                                 color: '#fff',

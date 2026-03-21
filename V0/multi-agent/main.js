@@ -1,6 +1,7 @@
 const axios = require("axios");
 const { runFireCrawl } = require('./component/firecrawl');  
 const { GenerateEmbedding, CreateCollection, CollectionExists, InsertBulkIntoQdrant, SearchQdrant} = require('./component/qdrant_db');
+const { sendQuotationEmail } = require('./component/mailer');
 const dotenv = require('dotenv');
 const uuid = require('uuid');
 const { llm } = require('./component/llm');
@@ -231,13 +232,15 @@ app.post("/creating/agent", requireMasterUser, (req, res) => {
 
 });
 
-// SSE streaming endpoint — emits progress steps and agents one by one
+// ── Pending session store (holds Phase 1 state while user reviews suggestions) ─
+const _pendingSessions = new Map();
+const SESSION_TTL = 30 * 60 * 1000; // 30 min — sessions auto-expire
+
+// Phase 1 SSE: crawl → embed → detect industry → emit suggestions, then stop
 app.post("/creating/agent/stream", requireMasterUser, (req, res) => {
     const { message } = req.body;
     const url = extractURFromText(message);
-    if (!url) {
-        return res.status(400).json({ error: "No URL found in the message" });
-    }
+    if (!url) return res.status(400).json({ error: 'No URL found in the message' });
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -245,26 +248,50 @@ app.post("/creating/agent/stream", requireMasterUser, (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
 
-    const emit = (data) => {
-        if (!res.writableEnded) {
-            res.write(`data: ${JSON.stringify(data)}\n\n`);
-        }
-    };
+    const emit = (data) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`); };
 
-    main(url, emit)
+    mainPhase1(url, emit)
+        .then(({ sessionId }) => {
+            // suggestions event already emitted inside mainPhase1 — just close the stream
+            emit({ type: 'awaiting_confirmation', sessionId, message: 'Review suggested agents and confirm to proceed.' });
+            res.end();
+        })
+        .catch(error => {
+            console.error('[Phase1] Error:', error);
+            emit({ type: 'error', message: error.message || 'Internal Server Error' });
+            res.end();
+        });
+
+    req.on('close', () => console.log('[Stream/Phase1] Client disconnected'));
+});
+
+// Phase 2 SSE: user confirmed agents → generate only selected agents, stream back
+app.post("/creating/agent/confirm/stream", requireMasterUser, (req, res) => {
+    const { sessionId, confirmedAgents } = req.body;
+    if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
+    if (!Array.isArray(confirmedAgents) || confirmedAgents.length === 0)
+        return res.status(400).json({ error: 'confirmedAgents array is required and must not be empty' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const emit = (data) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`); };
+
+    mainPhase2(sessionId, confirmedAgents, emit)
         .then(({ id, agents }) => {
             emit({ type: 'done', id, agentCount: agents.length });
             res.end();
         })
         .catch(error => {
-            console.error('Error in streaming agent creation:', error);
-            emit({ type: 'error', message: 'Internal Server Error' });
+            console.error('[Phase2] Error:', error);
+            emit({ type: 'error', message: error.message || 'Internal Server Error' });
             res.end();
         });
 
-    req.on('close', () => {
-        console.log('[Stream] Client disconnected');
-    });
+    req.on('close', () => console.log('[Stream/Phase2] Client disconnected'));
 });
 
 
@@ -508,8 +535,10 @@ Return ONLY valid JSON:
   "missing_description": "<if ready=false: plain English>",
   "question_for_orchestrator": "<if ready=false: question in English>",
   "intent_understood": "<one sentence in English>",
-  "action": null | "schedule" | "collect_info" | "follow_up" | "provide_info",
-  "action_data": {}
+  "action": null | "schedule" | "collect_info" | "follow_up" | "provide_info" | "send_quotation",
+    "action_data": {
+  // when send_quotation: email, customer_name, items[], total_amount, valid_until, notes
+    }
 }`;
         };
 
@@ -620,8 +649,38 @@ Return ONLY valid JSON — no extra text:
             }
 
             // ── Winner is ready → return ──────────────────────────────────────
-            if (agentCheck.ready && agentCheck.response) {
-                await db.saveChatMessage({ id: uuid.v4(), groupId, userMessage: message, response: agentCheck.response, agentName: selectedAgent.name, agentRole: selectedAgent.role });
+            if (agentCheck.ready && agentCheck.response) {   
+                await db.saveChatMessage({ id: uuid.v4(), groupId, userMessage: message, response: agentCheck.response, agentName: selectedAgent.name, agentRole: selectedAgent.role });   
+                if (agentCheck.action  === 'send_quotation' && agentCheck.action_data?.email) {
+                    try {
+                        await sendQuotationEmail({
+                            to          : agentCheck.action_data.email,
+                            customerName: agentCheck.action_data.customer_name || 'Valued Customer',
+                            companyName : companyName || 'Our Company',
+                            agentName   : selectedAgent.name,
+                            items       : agentCheck.action_data.items || [],
+                            totalAmount : agentCheck.action_data.total_amount || '',
+                            validUntil  : agentCheck.action_data.valid_until  || '',
+                            notes       : agentCheck.action_data.notes        || '',
+                        });
+                    } catch (e) {
+                        console.error('[Email] Failed to send quotation:', e.message);
+                    }
+                    
+                    //  We also need to add the response has been sent
+                    return res.json({
+                        status          : 'complete',
+                        response        : agentCheck.response + `\n\n(Note: A quotation email has been sent to ${agentCheck.action_data.email})`,
+                        intent_understood: agentCheck.intent_understood || message,
+                        action          : agentCheck.action || 'provide_info',
+                        action_data     : agentCheck.action_data || {},
+                        agent           : { name: selectedAgent.name, role: selectedAgent.role },
+                        intent          : message,
+                        iterations      : iteration + 1,
+                        
+
+                    });
+                }
                 return res.json({
                     status          : 'complete',
                     response        : agentCheck.response,
@@ -631,6 +690,7 @@ Return ONLY valid JSON — no extra text:
                     agent           : { name: selectedAgent.name, role: selectedAgent.role },
                     intent          : message,
                     iterations      : iteration + 1,
+
                 });
             }
 
@@ -660,7 +720,7 @@ Return ONLY valid JSON — no extra text:
             const userQuestion = (await CallLLM(
                 `User speaks ${userLanguage}. Agent needs: "${agentCheck.missing_description}". Write ONE short friendly question in ${userLanguage}. Return ONLY the question string.`,
                 '.', 150
-            )).trim() || `Could you please provide: ${agentCheck.missing_description}`;
+            )).trim() || `Could you please provide: ${agentCheck.missing_description}`;  
 
             return res.json({
                 status      : 'needs_input',
@@ -757,6 +817,144 @@ function createBenchmark(url) {
     return { start, end, save };
 }
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ── Phase 1: crawl → embed → detect industry → cache state → emit suggestions ─
+async function mainPhase1(url, emit = () => {}) {
+    const bench = createBenchmark(url);
+
+    emit({ type: 'step', step: 'crawling', message: 'Crawling website...' });
+    bench.start('crawl');
+    const crawlResult = await runFireCrawl(url);
+    bench.end('crawl');
+
+    bench.start('chunk');
+    const chunks = SplitIntoChunks(crawlResult.content, 1200, 150).slice(0, 20);
+    bench.end('chunk', { chunk_count: chunks.length });
+
+    emit({ type: 'step', step: 'embedding', message: `Building knowledge base (${chunks.length} chunks)...` });
+    bench.start('embed');
+    const embeddings = await Promise.all(chunks.map(chunk => GenerateEmbedding(chunk)));
+    bench.end('embed', { chunk_count: chunks.length });
+
+    const collectionName = uuid.v4();
+    const agentId = uuid.v4();
+
+    bench.start('db_save_group');
+    bench.start('qdrant_create_collection');
+    await Promise.all([
+        db.saveAgentGroup({ id: agentId, sourceUrl: url, qdrantCollection: collectionName }),
+        CollectionExists(collectionName).then(exists => {
+            if (!exists) return CreateCollection(collectionName);
+        }),
+    ]);
+    bench.end('db_save_group');
+    bench.end('qdrant_create_collection');
+
+    const validPoints = chunks
+        .map((chunk, index) => ({
+            id: uuid.v4(),
+            vector: embeddings[index],
+            payload: { text: chunk, source: url, chunk_index: index, scraped_at: new Date().toISOString() },
+        }))
+        .filter(p => Array.isArray(p.vector) && p.vector.length > 0);
+
+    emit({ type: 'step', step: 'storing',   message: 'Storing knowledge base...' });
+    emit({ type: 'step', step: 'detecting', message: 'Detecting industry...' });
+
+    bench.start('qdrant_insert');
+    bench.start('detect_industry');
+    const [, industryInfo] = await Promise.all([
+        InsertBulkIntoQdrant(collectionName, validPoints).then(r => {
+            bench.end('qdrant_insert', { points: validPoints.length });
+            return r;
+        }),
+        DetectIndustry(chunks, CallLLM).then(r => {
+            bench.end('detect_industry');
+            return r;
+        }),
+    ]);
+
+    const normalizedIndustryInfo = {
+        ...industryInfo,
+        company_name: industryInfo.company_name || deriveCompanyNameFromUrl(url),
+    };
+
+    // Cache state so Phase 2 can resume without re-crawling
+    const sessionId = uuid.v4();
+    _pendingSessions.set(sessionId, {
+        collectionName,
+        agentId,
+        normalizedIndustryInfo,
+        bench,
+        createdAt: Date.now(),
+    });
+
+    // Expire old sessions automatically
+    setTimeout(() => _pendingSessions.delete(sessionId), SESSION_TTL);
+
+    // Emit suggestions — frontend pauses here for user confirmation
+    emit({
+        type: 'suggestions',
+        sessionId,
+        industryInfo: {
+            company_name : normalizedIndustryInfo.company_name,
+            industry     : normalizedIndustryInfo.industry,
+            business_type: normalizedIndustryInfo.business_type,
+            key_topics   : normalizedIndustryInfo.key_topics,
+        },
+        suggested_agents: normalizedIndustryInfo.suggested_agents,
+    });
+
+    return { sessionId, normalizedIndustryInfo };
+}
+
+// ── Phase 2: user confirmed agents → generate → save ─────────────────────────
+async function mainPhase2(sessionId, confirmedAgents, emit = () => {}) {
+    const session = _pendingSessions.get(sessionId);
+    if (!session) throw new Error('Session not found or expired. Please restart agent creation.');
+    _pendingSessions.delete(sessionId); // consume once
+
+    const { collectionName, agentId, normalizedIndustryInfo, bench } = session;
+
+    // confirmedAgents may be strings (names only) or {name, description} objects — normalise to objects
+    const normalizedConfirmed = confirmedAgents.map(a =>
+        typeof a === 'string' ? { name: a } : a
+    );
+    const finalIndustryInfo = { ...normalizedIndustryInfo, suggested_agents: normalizedConfirmed };
+
+    const total = finalIndustryInfo.suggested_agents.length;
+    let agentIndex = 0;
+    emit({ type: 'step', step: 'generating', message: `Generating ${total} agent(s)...` });
+
+    bench.start('generate_agents');
+    const agentTimings = [];
+    const agents = await GenerateAgents(finalIndustryInfo, CallLLM, (agent) => {
+        agentTimings.push({ name: agent.name });
+        emit({ type: 'agent', agent, index: agentIndex, total });
+        agentIndex++;
+    });
+    bench.end('generate_agents', { agent_count: agents.length });
+
+    bench.start('db_finalize');
+    await db.saveAgentGroup({
+        id              : agentId,
+        qdrantCollection: collectionName,
+        industry        : normalizedIndustryInfo.industry,
+        businessType    : normalizedIndustryInfo.business_type,
+        companyName     : normalizedIndustryInfo.company_name,
+    });
+    await db.saveAgents(agentId, agents);
+    bench.end('db_finalize');
+
+    await bench.save({
+        company    : normalizedIndustryInfo.company_name,
+        industry   : normalizedIndustryInfo.industry,
+        agent_count: agents.length,
+        agents     : agentTimings,
+    });
+
+    return { id: agentId, agents };
+}
 
 async function main(url, emit = () => {}) {
 

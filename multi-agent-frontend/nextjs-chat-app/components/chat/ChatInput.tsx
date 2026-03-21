@@ -40,11 +40,11 @@ const ChatInput = ({ onSend, disabled = false }: ChatInputProps) => {
             display: 'flex',
             flexDirection: 'column',
             gap: '10px',
-            padding: '12px 20px 16px',
-            background: 'rgba(19,25,41,0.98)',
-            borderTop: '1px solid rgba(255,255,255,0.06)',
+            padding: '12px 24px 16px',
+            background: '#0D2D4B',
+            borderTop: '1px solid rgba(73,182,132,0.1)',
         }}>
-            {/* Quick action button */}
+            {/* Quick action */}
             <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                     onClick={handleCreateAgent}
@@ -53,11 +53,11 @@ const ChatInput = ({ onSend, disabled = false }: ChatInputProps) => {
                         display: 'flex',
                         alignItems: 'center',
                         gap: '6px',
-                        padding: '6px 14px',
-                        background: 'rgba(99,102,241,0.12)',
-                        border: '1px solid rgba(99,102,241,0.35)',
+                        padding: '5px 14px',
+                        background: 'rgba(73,182,132,0.08)',
+                        border: '1px solid rgba(73,182,132,0.25)',
                         borderRadius: '20px',
-                        color: '#818cf8',
+                        color: '#49B684',
                         fontSize: '12px',
                         fontWeight: 600,
                         fontFamily: 'inherit',
@@ -65,8 +65,8 @@ const ChatInput = ({ onSend, disabled = false }: ChatInputProps) => {
                         opacity: disabled ? 0.5 : 1,
                         transition: 'all 0.2s',
                     }}
-                    onMouseEnter={e => { if (!disabled) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.22)'; (e.currentTarget as HTMLButtonElement).style.color = '#a5b4fc'; } }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.12)'; (e.currentTarget as HTMLButtonElement).style.color = '#818cf8'; }}
+                    onMouseEnter={e => { if (!disabled) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(73,182,132,0.18)'; } }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(73,182,132,0.08)'; }}
                 >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="12" cy="12" r="3" />
@@ -78,77 +78,71 @@ const ChatInput = ({ onSend, disabled = false }: ChatInputProps) => {
 
             {/* Input row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <input
-                data-chat-input
-                type="text"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
-                disabled={disabled}
-                placeholder={disabled ? 'Processing your request...' : 'Paste a URL to analyze, e.g. "Analyze https://example.com"'}
-                style={{
-                    flex: 1,
-                    padding: '12px 18px',
-                    background: disabled ? 'rgba(11,14,23,0.4)' : 'rgba(11,14,23,0.8)',
-                    border: `1px solid ${focused && !disabled ? '#6366f1' : 'rgba(255,255,255,0.08)'}`,
-                    borderRadius: '12px',
-                    color: disabled ? 'rgba(255,255,255,0.3)' : '#f1f3f9',
-                    fontSize: '14px',
-                    fontFamily: 'inherit',
-                    outline: 'none',
-                    cursor: disabled ? 'not-allowed' : 'text',
-                    transition: 'all 0.2s',
-                    boxShadow: focused && !disabled ? '0 0 0 3px rgba(99,102,241,0.2)' : 'none',
-                }}
-            />
+                <input
+                    data-chat-input
+                    type="text"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onFocus={() => setFocused(true)}
+                    onBlur={() => setFocused(false)}
+                    disabled={disabled}
+                    placeholder={disabled ? 'Processing...' : 'Message Vomyra AI or paste a URL to generate agents...'}
+                    style={{
+                        flex: 1,
+                        padding: '13px 18px',
+                        background: '#071929',
+                        border: `1px solid ${focused && !disabled ? '#49B684' : 'rgba(73,182,132,0.12)'}`,
+                        borderRadius: '12px',
+                        color: disabled ? 'rgba(255,255,255,0.3)' : '#EDF2F7',
+                        fontSize: '14px',
+                        fontFamily: 'inherit',
+                        outline: 'none',
+                        cursor: disabled ? 'not-allowed' : 'text',
+                        transition: 'border-color 0.2s',
+                        boxShadow: focused && !disabled ? '0 0 0 3px rgba(73,182,132,0.12)' : 'none',
+                    }}
+                />
 
-            <button
-                onClick={handleSend}
-                disabled={!canSend}
-                style={{
-                    background: canSend
-                        ? 'linear-gradient(135deg, #4f7fff 0%, #9c4fff 100%)'
-                        : 'rgba(255,255,255,0.05)',
-                    color: canSend ? '#fff' : 'rgba(255,255,255,0.2)',
-                    border: 'none',
-                    borderRadius: '12px',
-                    padding: '12px 22px',
-                    cursor: canSend ? 'pointer' : 'not-allowed',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                    fontFamily: 'inherit',
-                    whiteSpace: 'nowrap',
-                    transition: 'all 0.2s',
-                    boxShadow: canSend ? '0 4px 18px rgba(99,102,241,0.45)' : 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    minWidth: '90px',
-                    justifyContent: 'center',
-                }}
-            >
-                {disabled ? (
-                    <>
-                        <span style={{
-                            width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)',
-                            borderTopColor: '#fff', borderRadius: '50%',
-                            display: 'inline-block',
-                            animation: 'spin 0.8s linear infinite',
-                        }} />
-                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-                    </>
-                ) : (
-                    <>
-                        Send
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="22" y1="2" x2="11" y2="13" />
-                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                        </svg>
-                    </>
-                )}
-            </button>
+                <button
+                    onClick={handleSend}
+                    disabled={!canSend}
+                    style={{
+                        background: canSend ? '#49B684' : 'rgba(73,182,132,0.08)',
+                        color: canSend ? '#fff' : 'rgba(73,182,132,0.3)',
+                        border: 'none',
+                        borderRadius: '12px',
+                        padding: '13px 22px',
+                        cursor: canSend ? 'pointer' : 'not-allowed',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        fontFamily: 'inherit',
+                        whiteSpace: 'nowrap',
+                        transition: 'all 0.2s',
+                        boxShadow: canSend ? '0 4px 16px rgba(73,182,132,0.35)' : 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        minWidth: '88px',
+                        justifyContent: 'center',
+                    }}
+                >
+                    {disabled ? (
+                        <span style={{ width: 14, height: 14, border: '2px solid rgba(73,182,132,0.3)', borderTopColor: '#49B684', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
+                    ) : (
+                        <>
+                            Send
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="22" y1="2" x2="11" y2="13" />
+                                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                            </svg>
+                        </>
+                    )}
+                </button>
+            </div>
+
+            <div style={{ textAlign: 'center', fontSize: '11px', color: 'rgba(180,205,225,0.25)' }}>
+                Powered by Vomyra AI — Press Enter to send
             </div>
         </div>
     );

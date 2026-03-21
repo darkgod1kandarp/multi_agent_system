@@ -3,6 +3,7 @@ const { DynamicStructuredTool }  = require('@langchain/core/tools');
 const { z }      = require('zod');
 const { Client } = require('pg');
 const dotenv = require('dotenv');
+const puppeteer = require('puppeteer');
 
 dotenv.config();
 
@@ -19,7 +20,28 @@ async function withClient(fn) {
     } finally {
         await client.end();
     }
+
 }
+
+
+const pdfTool = new DynamicStructuredTool({
+    name        : 'pdf_tool',
+    description : 'Tool to read PDF files and extract text content.',
+    schema      : z.object({
+        url: z.string().describe('URL of the PDF file to read.'),
+    }),
+    func: async ({ url }) => {
+        async function htmlToPDF(htmlString) {
+    const browser = await puppeteer.launch();
+    const page = await browser.newPage();
+    await page.setContent(htmlString);
+    const pdf = await page.pdf({ format: 'A4', printBackground: true });
+    await browser.close();
+    return pdf; // Buffer
+}
+    }
+
+});
 
 // ─── Single Tool: full SQL access ────────────────────────────────────────────
 

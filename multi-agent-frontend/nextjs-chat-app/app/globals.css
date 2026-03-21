@@ -2,14 +2,31 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+:root {
+    --bg-deep:    #071929;
+    --bg-primary: #0D2D4B;
+    --bg-surface: #0F3357;
+    --bg-card:    #102B45;
+    --green:      #49B684;
+    --green-light:#5AC896;
+    --green-dim:  rgba(73,182,132,0.12);
+    --green-border: rgba(73,182,132,0.25);
+    --text:       #EDF2F7;
+    --text-muted: rgba(180,205,225,0.55);
+    --border:     rgba(255,255,255,0.06);
+}
+
 html, body {
     height: 100%;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    background: #0b0e17;
-    color: #f1f3f9;
+    background: var(--bg-deep);
+    color: var(--text);
     -webkit-font-smoothing: antialiased;
 }
 
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #2a3050; border-radius: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(73,182,132,0.2); border-radius: 10px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }

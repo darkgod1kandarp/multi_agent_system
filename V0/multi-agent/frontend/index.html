@@ -280,6 +280,115 @@
       width           : 0%;
       transition      : width .3s;
     }
+
+    /* ── Agent Suggestions Panel ── */
+    #suggestions-panel {
+      display      : none;
+      background   : var(--surface);
+      border       : 1px solid var(--accent);
+      border-radius: var(--radius);
+      padding      : 1.5rem;
+      margin-bottom: 2rem;
+    }
+    #suggestions-panel h2 {
+      font-size    : 1rem;
+      font-weight  : 600;
+      color        : var(--accent2);
+      margin-bottom: .35rem;
+    }
+    #suggestions-panel .subtitle {
+      font-size    : .82rem;
+      color        : var(--muted);
+      margin-bottom: 1.25rem;
+    }
+    .suggestion-list {
+      display      : flex;
+      flex-direction: column;
+      gap          : .55rem;
+      margin-bottom: 1.25rem;
+    }
+    .suggestion-item {
+      display      : flex;
+      align-items  : center;
+      gap          : .75rem;
+      background   : var(--bg);
+      border       : 1px solid var(--border);
+      border-radius: 8px;
+      padding      : .65rem 1rem;
+      cursor       : pointer;
+      transition   : border-color .2s;
+      user-select  : none;
+    }
+    .suggestion-item:hover { border-color: var(--accent); }
+    .suggestion-item.selected { border-color: var(--accent2); background: rgba(0,212,170,.06); }
+    .suggestion-item input[type=checkbox] {
+      accent-color : var(--accent2);
+      width        : 16px;
+      height       : 16px;
+      cursor       : pointer;
+      flex-shrink  : 0;
+    }
+    .suggestion-item .agent-label { font-size: .9rem; flex: 1; }
+    .suggestion-item .remove-btn {
+      background   : none;
+      border       : none;
+      color        : var(--error);
+      font-size    : 1rem;
+      cursor       : pointer;
+      padding      : 0 .25rem;
+      opacity      : .6;
+      transition   : opacity .2s;
+    }
+    .suggestion-item .remove-btn:hover { opacity: 1; }
+    .add-agent-row {
+      display      : flex;
+      gap          : .5rem;
+      margin-bottom: 1.25rem;
+    }
+    .add-agent-row input {
+      flex         : 1;
+      background   : var(--bg);
+      border       : 1px solid var(--border);
+      border-radius: 8px;
+      color        : var(--text);
+      padding      : .6rem .9rem;
+      font-size    : .88rem;
+      outline      : none;
+    }
+    .add-agent-row input:focus { border-color: var(--accent); }
+    .add-agent-row input::placeholder { color: var(--muted); }
+    .btn-outline {
+      background   : transparent;
+      border       : 1px solid var(--accent);
+      color        : var(--accent);
+      border-radius: 8px;
+      padding      : .6rem 1.1rem;
+      font-size    : .88rem;
+      font-weight  : 600;
+      cursor       : pointer;
+      white-space  : nowrap;
+      transition   : background .2s;
+    }
+    .btn-outline:hover { background: rgba(108,99,255,.12); }
+    .suggestions-actions {
+      display      : flex;
+      gap          : .75rem;
+      align-items  : center;
+    }
+    .btn-confirm {
+      background   : linear-gradient(135deg, var(--accent), var(--accent2));
+      color        : #fff;
+      border       : none;
+      border-radius: 8px;
+      padding      : .7rem 1.6rem;
+      font-size    : .95rem;
+      font-weight  : 700;
+      cursor       : pointer;
+      transition   : opacity .2s;
+    }
+    .btn-confirm:hover:not(:disabled) { opacity: .85; }
+    .btn-confirm:disabled { opacity: .4; cursor: not-allowed; }
+    .selected-count { font-size: .82rem; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -294,6 +403,7 @@
   <!-- Input -->
   <div class="input-card">
     <input id="urlInput" type="url" placeholder="https://example.com" value="https://vomyra.com/" />
+    <input id="userIdInput" placeholder="User ID (master)" style="max-width:180px" />
     <button class="btn" id="runBtn" onclick="startPipeline()">Run Pipeline</button>
   </div>
 
@@ -315,6 +425,21 @@
   <!-- Log -->
   <div class="log-box" id="logBox"></div>
 
+  <!-- Agent Suggestions Confirmation Panel -->
+  <div id="suggestions-panel">
+    <h2>Suggested Agents</h2>
+    <p class="subtitle">These agents were detected for your business. Select the ones you want to create, add custom ones, or remove any you don't need.</p>
+    <div class="suggestion-list" id="suggestionList"></div>
+    <div class="add-agent-row">
+      <input id="customAgentInput" placeholder="Add a custom agent (e.g. Billing Agent)" />
+      <button class="btn-outline" onclick="addCustomAgent()">+ Add Agent</button>
+    </div>
+    <div class="suggestions-actions">
+      <button class="btn-confirm" id="confirmBtn" onclick="confirmAgents()">Create Selected Agents</button>
+      <span class="selected-count" id="selectedCount"></span>
+    </div>
+  </div>
+
   <!-- Industry card -->
   <div class="industry-card" id="industryCard">
     <h2>Detected Business Profile</h2>
@@ -330,11 +455,15 @@
 </div>
 
 <script>
-const STEP_ORDER = ['crawl','chunk','embed','store','industry','agents'];
+const STEP_ORDER  = ['crawling','embedding','storing','detecting','generating'];
+const STEP_LABELS = { crawling:'crawl', embedding:'embed', storing:'store', detecting:'industry', generating:'agents' };
 const AGENT_ICONS = ['🤖','🧠','💼','📞','📣','🛠️','📊','🔍'];
 
-let currentEventSource = null;
+let _currentSessionId  = null;
+let _suggestedAgents   = [];   // current list in the suggestions panel
+let _abortController   = null;
 
+// ── Logging ──────────────────────────────────────────────────────────────────
 function log(msg, cls = 'info') {
   const box = document.getElementById('logBox');
   box.style.display = 'block';
@@ -345,72 +474,146 @@ function log(msg, cls = 'info') {
   box.scrollTop = box.scrollHeight;
 }
 
+// ── Steps ─────────────────────────────────────────────────────────────────────
 function setStep(step, state) {
   const el = document.getElementById(`step-${step}`);
-  if (!el) return;
-  el.className = `step ${state}`;
+  if (el) el.className = `step ${state}`;
 }
-
 function activateStep(step) {
-  // Mark previous steps done
-  const idx = STEP_ORDER.indexOf(step);
-  STEP_ORDER.forEach((s, i) => {
+  const mapped = STEP_LABELS[step] || step;
+  const stepIds = Object.values(STEP_LABELS);
+  const idx = stepIds.indexOf(mapped);
+  stepIds.forEach((s, i) => {
     if (i < idx)  setStep(s, 'done');
     if (i === idx) setStep(s, 'active');
   });
 }
 
+// ── Industry card ─────────────────────────────────────────────────────────────
 function renderIndustry(data) {
   const card = document.getElementById('industryCard');
   const grid = document.getElementById('industryGrid');
   card.style.display = 'block';
-
   grid.innerHTML = `
+    <div class="field"><label>Company</label><p>${data.company_name || '—'}</p></div>
     <div class="field"><label>Industry</label><p>${data.industry}</p></div>
-    <div class="field"><label>Business Type</label><p>${data.business_type}</p></div>
+    <div class="field" style="grid-column:1/-1"><label>Business Type</label><p>${data.business_type}</p></div>
     <div class="field" style="grid-column:1/-1">
       <label>Key Topics</label>
       <div class="tags">${(data.key_topics||[]).map(t=>`<span class="tag">${t}</span>`).join('')}</div>
     </div>
-    <div class="field" style="grid-column:1/-1">
-      <label>Suggested Agents</label>
-      <div class="tags">${(data.suggested_agents||[]).map(a=>`<span class="tag">${a}</span>`).join('')}</div>
-    </div>
   `;
 }
 
-function renderAgents(agents) {
+// ── Suggestions panel ─────────────────────────────────────────────────────────
+function renderSuggestions(agents) {
+  _suggestedAgents = agents.map(a => (typeof a === 'string' ? a : (a.agent_name || a.name || JSON.stringify(a))));
+  refreshSuggestionList();
+  document.getElementById('suggestions-panel').style.display = 'block';
+}
+
+function refreshSuggestionList() {
+  const list = document.getElementById('suggestionList');
+  list.innerHTML = '';
+  _suggestedAgents.forEach((name, idx) => {
+    const item = document.createElement('div');
+    item.className = 'suggestion-item selected';
+    item.dataset.idx = idx;
+    item.innerHTML = `
+      <input type="checkbox" checked onchange="toggleAgent(${idx}, this)" />
+      <span class="agent-label">${escHtml(name)}</span>
+      <button class="remove-btn" title="Remove" onclick="removeAgent(${idx})">✕</button>
+    `;
+    item.addEventListener('click', e => {
+      if (e.target.tagName === 'BUTTON') return;
+      const cb = item.querySelector('input');
+      cb.checked = !cb.checked;
+      toggleAgent(idx, cb);
+    });
+    list.appendChild(item);
+  });
+  updateSelectedCount();
+}
+
+function toggleAgent(idx, cb) {
+  const items = document.querySelectorAll('.suggestion-item');
+  items.forEach(item => {
+    if (parseInt(item.dataset.idx) === idx) {
+      item.classList.toggle('selected', cb.checked);
+    }
+  });
+  updateSelectedCount();
+}
+
+function removeAgent(idx) {
+  _suggestedAgents.splice(idx, 1);
+  refreshSuggestionList();
+}
+
+function addCustomAgent() {
+  const input = document.getElementById('customAgentInput');
+  const name  = input.value.trim();
+  if (!name) return;
+  _suggestedAgents.push(name);
+  input.value = '';
+  refreshSuggestionList();
+  // Scroll to bottom of list
+  const list = document.getElementById('suggestionList');
+  list.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+}
+
+function updateSelectedCount() {
+  const checked = document.querySelectorAll('.suggestion-item input:checked').length;
+  const total   = _suggestedAgents.length;
+  document.getElementById('selectedCount').textContent = `${checked} of ${total} selected`;
+  document.getElementById('confirmBtn').disabled = checked === 0;
+}
+
+// ── Phase 2: confirm and generate ────────────────────────────────────────────
+async function confirmAgents() {
+  const checked = [...document.querySelectorAll('.suggestion-item input:checked')];
+  const confirmedAgents = checked.map(cb => cb.closest('.suggestion-item').querySelector('.agent-label').textContent.trim());
+  if (!confirmedAgents.length) { alert('Select at least one agent.'); return; }
+
+  document.getElementById('suggestions-panel').style.display = 'none';
+  document.getElementById('confirmBtn').disabled = true;
+
+  const userId = document.getElementById('userIdInput').value.trim();
+  log(`Creating ${confirmedAgents.length} agent(s)...`);
+  setStep('agents', 'active');
+
+  await streamRequest('/creating/agent/confirm/stream', { sessionId: _currentSessionId, confirmedAgents }, userId, handlePhase2Message);
+}
+
+// ── Agent cards ───────────────────────────────────────────────────────────────
+let _agentCardIndex = 0;
+function appendAgentCard(agent) {
   const section = document.getElementById('agents-section');
   const grid    = document.getElementById('agentsGrid');
   const heading = document.getElementById('agentsHeading');
   section.style.display = 'block';
-  heading.textContent   = `Generated Agents (${agents.length})`;
-  grid.innerHTML        = '';
-
-  agents.forEach((agent, i) => {
-    const icon  = AGENT_ICONS[i % AGENT_ICONS.length];
-    const card  = document.createElement('div');
-    card.className = 'agent-card';
-    const promptId = `prompt-${i}`;
-    card.innerHTML = `
-      <div class="agent-header">
-        <div class="agent-avatar">${icon}</div>
-        <div class="agent-meta">
-          <h3>${agent.name}</h3>
-          <span>${agent.role}</span>
-        </div>
+  const i    = _agentCardIndex++;
+  const icon = AGENT_ICONS[i % AGENT_ICONS.length];
+  const card = document.createElement('div');
+  card.className = 'agent-card';
+  const promptId = `prompt-${i}`;
+  card.innerHTML = `
+    <div class="agent-header">
+      <div class="agent-avatar">${icon}</div>
+      <div class="agent-meta">
+        <h3>${escHtml(agent.name)}</h3>
+        <span>${escHtml(agent.role || '')}</span>
       </div>
-      <div class="agent-body">
-        <div class="prompt-label">System Prompt</div>
-        <div class="prompt-text" id="${promptId}">${escHtml(agent.prompt)}</div>
-        <button class="expand-btn" onclick="togglePrompt('${promptId}', this)">Show more ▾</button>
-        <br/>
-        <button class="copy-btn" onclick="copyPrompt(${i})">Copy Prompt</button>
-      </div>
-    `;
-    card.dataset.prompt = agent.prompt;
-    grid.appendChild(card);
-  });
+    </div>
+    <div class="agent-body">
+      <div class="prompt-label">System Prompt</div>
+      <div class="prompt-text" id="${promptId}">${escHtml(agent.prompt || '')}</div>
+      <button class="expand-btn" onclick="togglePrompt('${promptId}', this)">Show more ▾</button><br/>
+      <button class="copy-btn" onclick="copyText(this, ${JSON.stringify(agent.prompt || '')})">Copy Prompt</button>
+    </div>
+  `;
+  grid.appendChild(card);
+  heading.textContent = `Generated Agents (${_agentCardIndex})`;
 }
 
 function togglePrompt(id, btn) {
@@ -419,107 +622,162 @@ function togglePrompt(id, btn) {
   btn.textContent = el.classList.contains('expanded') ? 'Show less ▴' : 'Show more ▾';
 }
 
-function copyPrompt(i) {
-  const cards = document.querySelectorAll('.agent-card');
-  navigator.clipboard.writeText(cards[i].dataset.prompt).then(() => {
-    const btn = cards[i].querySelector('.copy-btn');
+function copyText(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
     btn.textContent = 'Copied!';
     setTimeout(() => btn.textContent = 'Copy Prompt', 1500);
   });
 }
 
 function escHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  if (!str) return '';
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// ── Reset ─────────────────────────────────────────────────────────────────────
 function resetUI() {
-  // Reset steps
-  STEP_ORDER.forEach(s => setStep(s, ''));
-  // Hide sections
-  document.getElementById('logBox').style.display    = 'none';
-  document.getElementById('logBox').innerHTML        = '';
-  document.getElementById('industryCard').style.display = 'none';
+  Object.values(STEP_LABELS).forEach(s => setStep(s, ''));
+  document.getElementById('logBox').style.display          = 'none';
+  document.getElementById('logBox').innerHTML              = '';
+  document.getElementById('industryCard').style.display    = 'none';
+  document.getElementById('industryGrid').innerHTML        = '';
   document.getElementById('agents-section').style.display = 'none';
-  document.getElementById('agentsGrid').innerHTML    = '';
-  document.getElementById('progressWrap').style.display = 'none';
-  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('agentsGrid').innerHTML          = '';
+  document.getElementById('suggestions-panel').style.display = 'none';
+  document.getElementById('suggestionList').innerHTML      = '';
+  document.getElementById('progressWrap').style.display   = 'none';
+  document.getElementById('progressBar').style.width      = '0%';
+  _currentSessionId = null;
+  _suggestedAgents  = [];
+  _agentCardIndex   = 0;
 }
 
-function startPipeline() {
-  const url = document.getElementById('urlInput').value.trim();
-  if (!url) { alert('Please enter a URL.'); return; }
+// ── Generic POST SSE stream helper ────────────────────────────────────────────
+async function streamRequest(endpoint, body, userId, onMessage) {
+  if (_abortController) _abortController.abort();
+  _abortController = new AbortController();
 
-  if (currentEventSource) { currentEventSource.close(); }
+  const headers = { 'Content-Type': 'application/json' };
+  if (userId) headers['x-user-id'] = userId;
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: _abortController.signal,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+
+  const reader  = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer    = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // keep incomplete line
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try { onMessage(JSON.parse(line.slice(6))); } catch(e) {}
+      }
+    }
+  }
+}
+
+// ── Phase 1 message handler ───────────────────────────────────────────────────
+function handlePhase1Message(msg) {
+  if (msg.type === 'step') {
+    activateStep(msg.step);
+    log(msg.message);
+  }
+
+  if (msg.type === 'suggestions') {
+    _currentSessionId = msg.sessionId;
+    setStep('industry', 'done');
+    if (msg.industryInfo) renderIndustry({ ...msg.industryInfo, suggested_agents: msg.suggested_agents });
+    log(`Industry detected: ${msg.industryInfo?.industry || ''}. ${msg.suggested_agents.length} agents suggested.`, 'success');
+    renderSuggestions(msg.suggested_agents);
+  }
+
+  if (msg.type === 'awaiting_confirmation') {
+    log('Waiting for your agent selection…');
+    const runBtn = document.getElementById('runBtn');
+    runBtn.disabled    = false;
+    runBtn.textContent = 'Run Pipeline';
+  }
+
+  if (msg.type === 'error') {
+    log('Error: ' + msg.message, 'error');
+    setStep('crawl', 'error');
+    const runBtn = document.getElementById('runBtn');
+    runBtn.disabled    = false;
+    runBtn.textContent = 'Run Pipeline';
+  }
+}
+
+// ── Phase 2 message handler ───────────────────────────────────────────────────
+function handlePhase2Message(msg) {
+  if (msg.type === 'step') {
+    activateStep(msg.step);
+    log(msg.message);
+  }
+
+  if (msg.type === 'agent') {
+    log(`Agent created: ${msg.agent.name}`, 'success');
+    appendAgentCard(msg.agent);
+  }
+
+  if (msg.type === 'done') {
+    Object.values(STEP_LABELS).forEach(s => setStep(s, 'done'));
+    log(`Pipeline complete! ${msg.agentCount} agent(s) created.`, 'success');
+    const runBtn = document.getElementById('runBtn');
+    runBtn.disabled    = false;
+    runBtn.textContent = 'Run Pipeline';
+  }
+
+  if (msg.type === 'error') {
+    log('Error: ' + msg.message, 'error');
+    const runBtn = document.getElementById('runBtn');
+    runBtn.disabled    = false;
+    runBtn.textContent = 'Run Pipeline';
+  }
+}
+
+// ── Start pipeline (Phase 1) ──────────────────────────────────────────────────
+async function startPipeline() {
+  const url    = document.getElementById('urlInput').value.trim();
+  const userId = document.getElementById('userIdInput').value.trim();
+  if (!url) { alert('Please enter a URL.'); return; }
 
   resetUI();
 
   const runBtn = document.getElementById('runBtn');
-  runBtn.disabled = true;
-  runBtn.innerHTML = '<span class="spinner"></span>Running…';
+  runBtn.disabled   = true;
+  runBtn.innerHTML  = '<span class="spinner"></span>Analysing…';
 
-  const evtSrc = new EventSource(`/api/stream?url=${encodeURIComponent(url)}`);
-  currentEventSource = evtSrc;
-
-  evtSrc.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-
-    if (msg.type === 'progress') {
-      activateStep(msg.step);
-      log(msg.message);
-
-      if (msg.step === 'embed') {
-        const wrap = document.getElementById('progressWrap');
-        const bar  = document.getElementById('progressBar');
-        wrap.style.display = 'block';
-        if (msg.pct !== undefined) bar.style.width = msg.pct + '%';
-      } else {
-        document.getElementById('progressWrap').style.display = 'none';
-      }
-    }
-
-    if (msg.type === 'industry') {
-      setStep('industry', 'done');
-      renderIndustry(msg.data);
-      log('Industry detected: ' + msg.data.industry, 'success');
-    }
-
-    if (msg.type === 'agents') {
-      setStep('agents', 'done');
-      renderAgents(msg.data);
-      log(`Generated ${msg.data.length} agents.`, 'success');
-    }
-
-    if (msg.type === 'done') {
-      STEP_ORDER.forEach(s => setStep(s, 'done'));
-      log('Pipeline complete!', 'success');
-      evtSrc.close();
-      runBtn.disabled = false;
+  try {
+    await streamRequest('/creating/agent/stream', { message: url }, userId, handlePhase1Message);
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      log('Error: ' + e.message, 'error');
+      runBtn.disabled    = false;
       runBtn.textContent = 'Run Pipeline';
     }
-
-    if (msg.type === 'error') {
-      log('Error: ' + msg.message, 'error');
-      STEP_ORDER.forEach(s => {
-        const el = document.getElementById(`step-${s}`);
-        if (el && el.classList.contains('active')) setStep(s, 'error');
-      });
-      evtSrc.close();
-      runBtn.disabled = false;
-      runBtn.textContent = 'Run Pipeline';
-    }
-  };
-
-  evtSrc.onerror = () => {
-    log('Connection lost.', 'error');
-    evtSrc.close();
-    runBtn.disabled = false;
-    runBtn.textContent = 'Run Pipeline';
-  };
+  }
 }
 
 // Allow Enter key to submit
 document.getElementById('urlInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') startPipeline();
+});
+document.getElementById('customAgentInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addCustomAgent();
 });
 </script>
 </body>

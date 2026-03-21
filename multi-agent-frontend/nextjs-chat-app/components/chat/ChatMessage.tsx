@@ -16,6 +16,9 @@ interface ChatMessageProps {
     isError?: boolean;
     isStreaming?: boolean;
     streamStep?: string;
+    suggestions?: { name: string; description?: string }[];
+    sessionId?: string;
+    onConfirmSuggestions?: (sessionId: string, agents: { name: string; description?: string }[]) => void;
 }
 
 interface TestResult {
@@ -28,11 +31,11 @@ interface TestResult {
 }
 
 const GRADIENTS = [
-    ['#4f7fff', '#9c4fff'],
-    ['#22c55e', '#06b6d4'],
-    ['#f59e0b', '#ef4444'],
-    ['#ec4899', '#8b5cf6'],
-    ['#06b6d4', '#3b82f6'],
+    ['#49B684', '#2a9d7a'],
+    ['#2a9d7a', '#1a7a5e'],
+    ['#3aaa7a', '#49B684'],
+    ['#5AC896', '#2a9d7a'],
+    ['#49B684', '#3aaa7a'],
 ];
 
 const CORE_KEYS = new Set(['name', 'role', 'prompt']);
@@ -104,9 +107,168 @@ const TestResultBanner = ({ result }: { result: TestResult }) => {
     );
 };
 
+// ─── SuggestionsPanel ────────────────────────────────────────────────────────
+
+const SuggestionsPanel = ({ suggestions, sessionId, onConfirm }: {
+    suggestions: { name: string; description?: string }[];
+    sessionId: string;
+    onConfirm: (sessionId: string, agents: { name: string; description?: string }[]) => void;
+}) => {
+    const [list, setList] = useState<{ name: string; description?: string }[]>(suggestions);
+    const [selected, setSelected] = useState<Set<number>>(() => new Set(suggestions.map((_, i) => i)));
+    const [customInput, setCustomInput] = useState('');
+    const [customDesc, setCustomDesc] = useState('');
+    const [confirmed, setConfirmed] = useState(false);
+
+    const toggle = (idx: number) => {
+        setSelected(prev => {
+            const next = new Set(prev);
+            next.has(idx) ? next.delete(idx) : next.add(idx);
+            return next;
+        });
+    };
+
+    const remove = (idx: number) => {
+        setList(prev => prev.filter((_, i) => i !== idx));
+        setSelected(prev => {
+            const next = new Set<number>();
+            prev.forEach(i => { if (i < idx) next.add(i); else if (i > idx) next.add(i - 1); });
+            return next;
+        });
+    };
+
+    const addCustom = () => {
+        const name = customInput.trim();
+        if (!name) return;
+        setList(prev => [...prev, { name, description: customDesc.trim() || undefined }]);
+        setSelected(prev => { const next = new Set(Array.from(prev)); next.add(list.length); return next; });
+        setCustomInput('');
+        setCustomDesc('');
+    };
+
+    const handleConfirm = () => {
+        const chosen = list.filter((_, i) => selected.has(i));
+        if (!chosen.length) return;
+        setConfirmed(true);
+        onConfirm(sessionId, chosen);
+    };
+
+    const selectedCount = list.filter((_, i) => selected.has(i)).length;
+
+    if (confirmed) return (
+        <div style={{ fontSize: '13px', color: '#49B684', padding: '10px 14px', background: 'rgba(73,182,132,0.07)', border: '1px solid rgba(73,182,132,0.2)', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ width: 10, height: 10, border: '2px solid rgba(73,182,132,0.3)', borderTopColor: '#49B684', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+            Creating {selectedCount} agent{selectedCount !== 1 ? 's' : ''}...
+        </div>
+    );
+
+    return (
+        <div style={{ background: '#0D2D4B', border: '1px solid rgba(73,182,132,0.2)', borderRadius: '16px', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase', color: 'rgba(73,182,132,0.7)' }}>
+                Select Agents to Create
+            </div>
+
+            {/* Agent checklist */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {list.map((agent, idx) => {
+                    const isChecked = selected.has(idx);
+                    return (
+                        <div key={idx} style={{
+                            display: 'flex', alignItems: 'center', gap: '10px',
+                            padding: '10px 12px',
+                            background: isChecked ? 'rgba(73,182,132,0.1)' : 'rgba(255,255,255,0.02)',
+                            border: `1px solid ${isChecked ? 'rgba(73,182,132,0.35)' : 'rgba(255,255,255,0.06)'}`,
+                            borderRadius: '10px', cursor: 'pointer', transition: 'all 0.15s',
+                            userSelect: 'none',
+                        }}
+                            onClick={() => toggle(idx)}
+                        >
+                            <div style={{
+                                width: 18, height: 18, borderRadius: '5px', flexShrink: 0,
+                                border: `2px solid ${isChecked ? '#49B684' : 'rgba(255,255,255,0.2)'}`,
+                                background: isChecked ? '#49B684' : 'transparent',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.15s',
+                            }}>
+                                {isChecked && (
+                                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                                        <polyline points="2,6 5,9 10,3" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                )}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '13px', fontWeight: 600, color: isChecked ? '#EDF2F7' : 'rgba(180,205,225,0.5)', lineHeight: 1.3 }}>
+                                    {agent.name}
+                                </div>
+                                {agent.description && (
+                                    <div style={{ fontSize: '11px', color: isChecked ? 'rgba(73,182,132,0.6)' : 'rgba(140,160,180,0.35)', marginTop: '2px', lineHeight: 1.4 }}>
+                                        {agent.description}
+                                    </div>
+                                )}
+                            </div>
+                            <button
+                                onClick={e => { e.stopPropagation(); remove(idx); }}
+                                style={{ background: 'none', border: 'none', color: 'rgba(239,68,68,0.4)', fontSize: '14px', cursor: 'pointer', padding: '0 2px', lineHeight: 1, flexShrink: 0 }}
+                                title="Remove"
+                            >✕</button>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* Add custom agent */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                        value={customInput}
+                        onChange={e => setCustomInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && customDesc.trim() ? undefined : e.key === 'Enter' && addCustom()}
+                        placeholder="Agent name *"
+                        style={{ flex: 1, padding: '8px 12px', background: '#071929', border: '1px solid rgba(73,182,132,0.15)', borderRadius: '8px', color: '#EDF2F7', fontSize: '13px', fontFamily: 'inherit', outline: 'none' }}
+                    />
+                    <button
+                        onClick={addCustom}
+                        disabled={!customInput.trim()}
+                        style={{ padding: '8px 14px', background: customInput.trim() ? 'rgba(73,182,132,0.15)' : 'rgba(73,182,132,0.05)', border: '1px solid rgba(73,182,132,0.3)', borderRadius: '8px', color: '#49B684', fontSize: '13px', fontWeight: 600, cursor: customInput.trim() ? 'pointer' : 'not-allowed', fontFamily: 'inherit', opacity: customInput.trim() ? 1 : 0.4, whiteSpace: 'nowrap' }}
+                    >+ Add</button>
+                </div>
+                <input
+                    value={customDesc}
+                    onChange={e => setCustomDesc(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addCustom()}
+                    placeholder="Short description (optional)"
+                    style={{ padding: '7px 12px', background: '#071929', border: '1px solid rgba(73,182,132,0.08)', borderRadius: '8px', color: 'rgba(180,205,225,0.7)', fontSize: '12px', fontFamily: 'inherit', outline: 'none' }}
+                />
+            </div>
+
+            {/* Confirm button */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingTop: '4px' }}>
+                <button
+                    onClick={handleConfirm}
+                    disabled={selectedCount === 0}
+                    style={{
+                        padding: '9px 22px',
+                        background: selectedCount > 0 ? '#49B684' : 'rgba(73,182,132,0.08)',
+                        border: 'none', borderRadius: '10px', color: '#fff',
+                        fontSize: '13px', fontWeight: 700, cursor: selectedCount > 0 ? 'pointer' : 'not-allowed',
+                        fontFamily: 'inherit', opacity: selectedCount > 0 ? 1 : 0.4,
+                        boxShadow: selectedCount > 0 ? '0 4px 18px rgba(73,182,132,0.35)' : 'none',
+                        transition: 'all 0.2s',
+                    }}
+                >
+                    Create {selectedCount} Agent{selectedCount !== 1 ? 's' : ''}
+                </button>
+                <span style={{ fontSize: '12px', color: 'rgba(73,182,132,0.4)' }}>
+                    {selectedCount} of {list.length} selected
+                </span>
+            </div>
+        </div>
+    );
+};
+
 // ─── ChatMessage ────────────────────────────────────────────────────────────
 
-const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, groupId, isError, isStreaming, streamStep }) => {
+const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, groupId, isError, isStreaming, streamStep, suggestions, sessionId, onConfirmSuggestions }) => {
     const isUser = sender === 'User';
     const router = useRouter();
     const { user, isMaster } = useUser();
@@ -227,43 +389,70 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
     };
 
     return (
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', flexDirection: isUser ? 'row-reverse' : 'row' }}>
+        <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '14px',
+            flexDirection: isUser ? 'row-reverse' : 'row',
+            padding: isUser ? '16px 24px' : '16px 24px',
+            background: isUser ? 'transparent' : 'rgba(13,45,75,0.3)',
+            borderBottom: '1px solid rgba(73,182,132,0.04)',
+        }}>
             {/* Avatar */}
             <div style={{
-                width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+                width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '13px', fontWeight: 700, color: '#fff', marginTop: '2px',
-                background: isUser ? 'linear-gradient(135deg,#4f7fff,#9c4fff)' : isError ? 'linear-gradient(135deg,#ef4444,#f97316)' : 'linear-gradient(135deg,#22c55e,#06b6d4)',
-                boxShadow: isUser ? '0 3px 12px rgba(99,102,241,0.45)' : isError ? '0 3px 12px rgba(239,68,68,0.4)' : '0 3px 12px rgba(34,197,94,0.35)',
+                fontSize: '13px', fontWeight: 700, color: '#fff',
+                background: isUser
+                    ? 'linear-gradient(135deg, #0D2D4B, #1a4a6b)'
+                    : isError
+                        ? 'linear-gradient(135deg,#ef4444,#f97316)'
+                        : 'linear-gradient(135deg, #49B684, #2a9d7a)',
+                border: isUser ? '2px solid rgba(73,182,132,0.3)' : 'none',
+                boxShadow: isUser ? 'none' : isError ? '0 3px 12px rgba(239,68,68,0.3)' : '0 3px 12px rgba(73,182,132,0.25)',
             }}>
-                {isUser ? 'U' : isError ? '!' : 'AI'}
+                {isUser ? 'U' : isError ? '!' : (
+                    <img src="/logo.png" alt="Myra" style={{ width: 20, height: 20, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget.parentElement as HTMLElement).innerText = 'M'; }} />
+                )}
             </div>
 
             {/* Content column */}
-            <div style={{ maxWidth: isUser ? '65%' : '85%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ maxWidth: isUser ? '70%' : '88%', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
+
+                {/* Sender label */}
+                <div style={{ fontSize: '12px', fontWeight: 600, color: isUser ? 'rgba(180,205,225,0.5)' : '#49B684', marginBottom: '-6px' }}>
+                    {isUser ? 'You' : isError ? 'Error' : 'Myra'}
+                </div>
 
                 {/* Message bubble */}
                 <div style={{
-                    padding: '12px 16px',
-                    borderRadius: isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                    fontSize: '14px', lineHeight: '1.65', wordBreak: 'break-word',
-                    background: isUser ? 'linear-gradient(135deg,#4f7fff 0%,#9c4fff 100%)' : isError ? 'rgba(239,68,68,0.1)' : 'rgba(26,32,53,0.95)',
-                    color: '#f1f3f9',
-                    border: isUser ? 'none' : isError ? '1px solid rgba(239,68,68,0.3)' : isStreaming ? '1px solid rgba(99,102,241,0.3)' : '1px solid rgba(255,255,255,0.07)',
-                    boxShadow: isUser ? '0 6px 24px rgba(99,102,241,0.35)' : '0 4px 16px rgba(0,0,0,0.3)',
+                    padding: isUser ? '12px 16px' : '0',
+                    borderRadius: '12px',
+                    fontSize: '14px', lineHeight: '1.7', wordBreak: 'break-word',
+                    background: isUser ? '#49B684' : 'transparent',
+                    color: isUser ? '#fff' : isError ? '#f87171' : '#EDF2F7',
+                    border: isUser ? 'none' : isError ? '1px solid rgba(239,68,68,0.3)' : 'none',
+                    display: 'inline-block',
+                    maxWidth: isUser ? '100%' : undefined,
                 }}>
-                    <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.8px', textTransform: 'uppercase', marginBottom: '5px', opacity: 0.65, color: isUser ? '#e0e7ff' : isError ? '#f87171' : '#818cf8' }}>
-                        {sender}
-                    </div>
                     {isStreaming ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ width: 10, height: 10, border: '2px solid rgba(99,102,241,0.3)', borderTopColor: '#818cf8', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
-                            <span style={{ color: 'rgba(180,190,230,0.75)', fontSize: '13px' }}>{streamStep || 'Working...'}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0' }}>
+                            <span style={{ width: 10, height: 10, border: '2px solid rgba(73,182,132,0.3)', borderTopColor: '#49B684', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite', flexShrink: 0 }} />
+                            <span style={{ color: 'rgba(73,182,132,0.8)', fontSize: '14px' }}>{streamStep || 'Working...'}</span>
                         </div>
                     ) : (
                         message
                     )}
                 </div>
+
+                {/* Suggestions confirmation panel */}
+                {suggestions && suggestions.length > 0 && sessionId && onConfirmSuggestions && (
+                    <SuggestionsPanel
+                        suggestions={suggestions}
+                        sessionId={sessionId}
+                        onConfirm={onConfirmSuggestions}
+                    />
+                )}
 
                 {/* Agent cards */}
                 {(agents && agents.length > 0 || isStreaming) && (
@@ -274,7 +463,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                             <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: 600, letterSpacing: '1px', textTransform: 'uppercase', color: 'rgba(129,140,248,0.6)' }}>
                                 {allAgents.length} Agent{allAgents.length !== 1 ? 's' : ''} {isStreaming ? 'Creating...' : 'Generated'}
                                 {isStreaming && (
-                                    <span style={{ width: 8, height: 8, border: '2px solid rgba(99,102,241,0.3)', borderTopColor: '#818cf8', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
+                                    <span style={{ width: 8, height: 8, border: '2px solid rgba(73,182,132,0.3)', borderTopColor: '#49B684', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />
                                 )}
                             </span>
 
@@ -286,14 +475,14 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                                     title={!isMaster ? 'Only master users can finalize agents' : undefined}
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: '6px',
-                                        background: (!isMaster || finalizeAllLoading || isStreaming) ? 'rgba(99,102,241,0.15)' : 'linear-gradient(135deg,#4f7fff,#9c4fff)',
+                                        background: (!isMaster || finalizeAllLoading || isStreaming) ? 'rgba(73,182,132,0.15)' : 'linear-gradient(135deg,#49B684,#2a9d7a)',
                                         border: 'none', borderRadius: '8px',
                                         padding: '6px 14px', color: '#fff',
                                         fontSize: '12px', fontWeight: 600,
                                         cursor: (!isMaster || finalizeAllLoading || isStreaming) ? 'not-allowed' : 'pointer',
                                         fontFamily: 'inherit',
                                         opacity: (!isMaster || finalizeAllLoading || isStreaming) ? 0.5 : 1,
-                                        boxShadow: (!isMaster || finalizeAllLoading || isStreaming) ? 'none' : '0 3px 14px rgba(99,102,241,0.4)',
+                                        boxShadow: (!isMaster || finalizeAllLoading || isStreaming) ? 'none' : '0 3px 14px rgba(73,182,132,0.4)',
                                     }}
                                 >
                                     {finalizeAllLoading ? (
@@ -368,8 +557,8 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
 
                         {/* Add Agent Form — master only */}
                         {!isMaster ? null : showAddForm ? (
-                            <div style={{ background: 'rgba(15,20,35,0.95)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: '16px', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#818cf8', letterSpacing: '0.7px', textTransform: 'uppercase' }}>New Agent</div>
+                            <div style={{ background: '#0D2D4B', border: '1px solid rgba(73,182,132,0.35)', borderRadius: '16px', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                <div style={{ fontSize: '12px', fontWeight: 700, color: '#49B684', letterSpacing: '0.7px', textTransform: 'uppercase' }}>New Agent</div>
                                 <input
                                     placeholder="Agent name *"
                                     value={newAgentName}
@@ -396,7 +585,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                                 )}
                                 <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                                     <button onClick={() => { setShowAddForm(false); setAddAgentError(''); }} style={{ padding: '6px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: 'rgba(200,210,240,0.6)', fontSize: '12px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
-                                    <button onClick={handleAddAgent} disabled={!newAgentName.trim() || !newAgentRole.trim() || addAgentLoading} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 16px', background: 'linear-gradient(135deg,#4f7fff,#9c4fff)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: !newAgentName.trim() || !newAgentRole.trim() || addAgentLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: !newAgentName.trim() || !newAgentRole.trim() || addAgentLoading ? 0.6 : 1 }}>
+                                    <button onClick={handleAddAgent} disabled={!newAgentName.trim() || !newAgentRole.trim() || addAgentLoading} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 16px', background: 'linear-gradient(135deg,#49B684,#2a9d7a)', border: 'none', borderRadius: '8px', color: '#fff', fontSize: '12px', fontWeight: 600, cursor: !newAgentName.trim() || !newAgentRole.trim() || addAgentLoading ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: !newAgentName.trim() || !newAgentRole.trim() || addAgentLoading ? 0.6 : 1 }}>
                                         {addAgentLoading && <span style={{ width: 10, height: 10, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.8s linear infinite' }} />}
                                         {addAgentLoading ? 'Validating & testing...' : 'Add Agent'}
                                     </button>
@@ -405,9 +594,9 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ sender, message, agents, grou
                         ) : (
                             <button
                                 onClick={() => setShowAddForm(true)}
-                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', background: 'rgba(99,102,241,0.06)', border: '1px dashed rgba(99,102,241,0.3)', borderRadius: '12px', color: 'rgba(129,140,248,0.7)', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s' }}
-                                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.14)'; (e.currentTarget as HTMLButtonElement).style.color = '#a5b4fc'; }}
-                                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.06)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(129,140,248,0.7)'; }}
+                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '10px', background: 'rgba(73,182,132,0.06)', border: '1px dashed rgba(73,182,132,0.3)', borderRadius: '12px', color: 'rgba(129,140,248,0.7)', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s' }}
+                                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(73,182,132,0.14)'; (e.currentTarget as HTMLButtonElement).style.color = '#49B684'; }}
+                                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(73,182,132,0.06)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(129,140,248,0.7)'; }}
                             >
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                     <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -503,8 +692,8 @@ const AgentCard = ({ agent, index, explanation, testResult, onExplanationChange,
 
     return (
         <div style={{
-            background: 'rgba(15,20,35,0.95)',
-            border: `1px solid ${isEditing ? `${start}55` : 'rgba(255,255,255,0.07)'}`,
+            background: '#0D2D4B',
+            border: `1px solid ${isEditing ? `${start}55` : 'rgba(73,182,132,0.1)'}`,
             borderRadius: '16px', overflow: 'hidden',
             boxShadow: isEditing
                 ? `0 8px 40px rgba(0,0,0,0.5), 0 0 0 1px ${start}33`

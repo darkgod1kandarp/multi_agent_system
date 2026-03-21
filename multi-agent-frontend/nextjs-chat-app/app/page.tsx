@@ -12,7 +12,6 @@ const Page = () => {
     const { user, setUser, isMaster } = useUser();
     const router = useRouter();
 
-    // Re-sync role from backend in case it changed since last login
     useEffect(() => {
         if (!user) return;
         fetchWithTimeout(`${BACKEND_URL}/users`)
@@ -30,20 +29,21 @@ const Page = () => {
         <div style={{
             display: 'flex',
             flexDirection: 'column',
-            minHeight: '100vh',
-            background: '#0b0e17',
-            backgroundImage: 'radial-gradient(ellipse at 15% 50%, rgba(99,102,241,0.08) 0%, transparent 55%), radial-gradient(ellipse at 85% 15%, rgba(168,85,247,0.08) 0%, transparent 50%)',
+            height: '100vh',
+            background: '#071929',
             fontFamily: "'Inter', -apple-system, sans-serif",
+            overflow: 'hidden',
         }}>
             {/* Announcement Banner */}
             <div style={{
-                background: 'linear-gradient(90deg, #22c55e 0%, #06b6d4 40%, #a855f7 100%)',
+                background: 'linear-gradient(90deg, #49B684 0%, #2a9d7a 50%, #0D7A6B 100%)',
                 color: '#fff',
                 textAlign: 'center',
-                padding: '9px 16px',
-                fontSize: '13px',
+                padding: '8px 16px',
+                fontSize: '12px',
                 fontWeight: 500,
                 letterSpacing: '0.2px',
+                flexShrink: 0,
             }}>
                 ✨ Vomyra AI is now live in the US, UK, Canada &amp; Australia 🌍 &nbsp;|&nbsp; Create an Agent in YOUR Voice. Try It Free 🚀
             </div>
@@ -53,32 +53,18 @@ const Page = () => {
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                padding: '16px 36px',
-                background: 'rgba(19,25,41,0.95)',
-                borderBottom: '1px solid rgba(255,255,255,0.07)',
-                backdropFilter: 'blur(12px)',
-                position: 'sticky',
-                top: 0,
-                zIndex: 10,
+                padding: '12px 28px',
+                background: '#0D2D4B',
+                borderBottom: '1px solid rgba(73,182,132,0.12)',
+                flexShrink: 0,
             }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    {/* Logo mark */}
-                    <div style={{
-                        width: 36, height: 36,
-                        borderRadius: '10px',
-                        background: 'linear-gradient(135deg, #4f7fff, #9c4fff)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: '16px', fontWeight: 700, color: '#fff',
-                        boxShadow: '0 4px 14px rgba(99,102,241,0.4)',
-                    }}>V</div>
-                    <span style={{
-                        fontSize: '18px',
-                        fontWeight: 700,
-                        background: 'linear-gradient(90deg, #818cf8, #c084fc)',
-                        WebkitBackgroundClip: 'text',
-                        WebkitTextFillColor: 'transparent',
-                        backgroundClip: 'text',
-                    }}>Vomyra Chat</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <img
+                        src="/logo.png"
+                        alt="Vomyra"
+                        style={{ height: 42, width: 'auto', objectFit: 'contain' }}
+                        onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                    />
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -88,10 +74,10 @@ const Page = () => {
                             style={{
                                 display: 'flex', alignItems: 'center', gap: '6px',
                                 padding: '6px 14px',
-                                background: 'rgba(168,85,247,0.12)',
-                                border: '1px solid rgba(168,85,247,0.3)',
+                                background: 'rgba(73,182,132,0.1)',
+                                border: '1px solid rgba(73,182,132,0.25)',
                                 borderRadius: '8px',
-                                color: '#c084fc',
+                                color: '#49B684',
                                 fontSize: '12px', fontWeight: 600,
                                 cursor: 'pointer', fontFamily: 'inherit',
                                 transition: 'all 0.15s',
@@ -105,26 +91,25 @@ const Page = () => {
                     )}
                     {user && (
                         <>
-                            {/* User avatar */}
                             <div style={{
                                 width: 30, height: 30, borderRadius: '50%',
                                 background: isMaster
-                                    ? 'linear-gradient(135deg, #a855f7, #ec4899)'
-                                    : 'linear-gradient(135deg, #4f7fff, #9c4fff)',
+                                    ? 'linear-gradient(135deg, #49B684, #2a9d7a)'
+                                    : 'linear-gradient(135deg, #0D2D4B, #1a4a6b)',
+                                border: '2px solid rgba(73,182,132,0.4)',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                                 fontSize: '12px', fontWeight: 700, color: '#fff',
-                                boxShadow: isMaster ? '0 2px 8px rgba(168,85,247,0.4)' : '0 2px 8px rgba(99,102,241,0.35)',
                                 flexShrink: 0,
                             }}>
                                 {user.username.charAt(0).toUpperCase()}
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
-                                <span style={{ fontSize: '13px', fontWeight: 600, color: '#e0e7ff', lineHeight: 1 }}>
+                                <span style={{ fontSize: '13px', fontWeight: 600, color: '#EDF2F7', lineHeight: 1 }}>
                                     {user.username}
                                 </span>
                                 <span style={{
                                     fontSize: '10px', fontWeight: 700, letterSpacing: '0.5px',
-                                    color: isMaster ? '#c084fc' : '#818cf8',
+                                    color: isMaster ? '#49B684' : 'rgba(180,205,225,0.5)',
                                 }}>
                                     {isMaster ? '★ MASTER' : 'NORMAL'}
                                 </span>
@@ -134,10 +119,10 @@ const Page = () => {
                                 title="Switch account"
                                 style={{
                                     padding: '4px 10px',
-                                    background: 'rgba(255,255,255,0.04)',
-                                    border: '1px solid rgba(255,255,255,0.1)',
+                                    background: 'rgba(255,255,255,0.03)',
+                                    border: '1px solid rgba(255,255,255,0.08)',
                                     borderRadius: '8px',
-                                    color: 'rgba(255,255,255,0.35)',
+                                    color: 'rgba(255,255,255,0.3)',
                                     fontSize: '11px', fontWeight: 500,
                                     cursor: 'pointer', fontFamily: 'inherit',
                                 }}
@@ -149,27 +134,16 @@ const Page = () => {
                 </div>
             </header>
 
-            {/* Chat area */}
+            {/* Chat area — fills remaining height */}
             <main style={{
                 flex: 1,
                 display: 'flex',
-                alignItems: 'flex-start',
+                alignItems: 'stretch',
                 justifyContent: 'center',
-                padding: '32px 16px',
+                overflow: 'hidden',
             }}>
                 <ChatWindow />
             </main>
-
-            {/* Footer */}
-            <footer style={{
-                textAlign: 'center',
-                padding: '14px',
-                fontSize: '12px',
-                color: 'rgba(255,255,255,0.2)',
-                borderTop: '1px solid rgba(255,255,255,0.04)',
-            }}>
-                Powered by Vomyra AI — Empowering Conversation with Voice AI
-            </footer>
         </div>
     );
 };
