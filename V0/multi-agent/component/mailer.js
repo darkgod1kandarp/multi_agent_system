@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const puppeteer = require('puppeteer');
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -11,9 +12,9 @@ const transporter = nodemailer.createTransport({
 function buildQuotationHTML({ customerName, companyName, agentName, items, totalAmount, validUntil, notes }) {
     const rows = (items || []).map(item => `
         <tr>
-            <td style="padding:8px 12px;border-bottom:1px solid #eee">${item.description}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #eee">${item.description || 'Item'}</td>
             <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">${item.qty || 1}</td>
-            <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">${item.price}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">${item.price || 'To be discussed'}</td>
         </tr>`).join('');
 
     return `
@@ -38,7 +39,7 @@ function buildQuotationHTML({ customerName, companyName, agentName, items, total
                 <tfoot>
                     <tr>
                         <td colspan="2" style="padding:12px;text-align:right;font-weight:bold">Total</td>
-                        <td style="padding:12px;text-align:right;font-weight:bold;color:#4f46e5">${totalAmount}</td>
+                        <td style="padding:12px;text-align:right;font-weight:bold;color:#4f46e5">${totalAmount || 'To be discussed'}</td>
                     </tr>
                 </tfoot>
             </table>
@@ -55,17 +56,36 @@ function buildQuotationHTML({ customerName, companyName, agentName, items, total
     </div>`;
 }
 
+async function generatePDF(html) {
+    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    try {
+        const page = await browser.newPage();
+        await page.setContent(`<!DOCTYPE html><html><body>${html}</body></html>`, { waitUntil: 'networkidle0' });
+        const pdf = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20px', bottom: '20px', left: '20px', right: '20px' } });
+        return pdf;
+    } finally {
+        await browser.close();
+    }
+}
+
 async function sendQuotationEmail({ to, customerName, companyName, agentName, items, totalAmount, validUntil, notes }) {
     const html = buildQuotationHTML({ customerName, companyName, agentName, items, totalAmount, validUntil, notes });
+    const pdfBuffer = await generatePDF(html);
 
     await transporter.sendMail({
         from: `"${companyName}" <${process.env.EMAIL_USER}>`,
         to,
         subject: `Your Quotation from ${companyName}`,
         html,
+        attachments: [
+            {
+                filename: `Quotation-${companyName.replace(/\s+/g, '_')}.pdf`,
+                content: pdfBuffer,
+                contentType: 'application/pdf',
+            },
+        ],
     });
 
-    console.log(`[Email] Quotation sent to ${to}`);
-}
+    console.log(`[Email] Quotation with PDF sent to ${to}`);}
 
 module.exports = { sendQuotationEmail };

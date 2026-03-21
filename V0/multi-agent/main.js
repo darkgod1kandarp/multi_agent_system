@@ -529,6 +529,10 @@ ${firstGreet ? '0. Start with warm greeting and self-introduction.' : ''}
 3. NEVER mark company_name / agent_name as missing.
 4. NEVER ask for info already in Collected context or Business Knowledge.
 5. If out-of-scope, set confidence ≤ 3 and set transfer_to to the correct agent.
+6. ACTION RULES — read carefully before choosing action:
+   - Use "send_quotation" when the user EXPLICITLY asks to send/email/mail a quote or proposal — examples: "send the quotation", "email this to him", "send it to john@example.com", "mail the quote", "quote bhejo", "send kar do", "email bhej do". If an email address appears anywhere in the user's message or in Collected context, extract it into action_data.email and set action "send_quotation". If no email address is available, set ready: false and ask for it — do NOT silently fall back to "provide_info".
+   - Use "send_lead_emails" when the user wants to reach out to a list of external businesses/leads.
+   - Use "provide_info" ONLY when the user is asking a question or wants information — NOT when they are asking you to send something.
 
 Return ONLY valid JSON:
 {
@@ -542,8 +546,8 @@ Return ONLY valid JSON:
   "intent_understood": "<one sentence in English>",
   "action": null | "schedule" | "collect_info" | "follow_up" | "provide_info" | "send_quotation" | "send_lead_emails",
   "action_data": {
-    "email": "<customer email, only for send_quotation>",
-    "customer_name": "<customer name, only for send_quotation>",
+    "email": "<REQUIRED for send_quotation — extract from user message or Collected context>",
+    "customer_name": "<customer name, for send_quotation>",
     "items": [{ "description": "<item name>", "qty": <number>, "price": "<e.g. ₹5000, or 'To be discussed' if unknown>" }],
     "total_amount": "<e.g. ₹15000>",
     "valid_until": "<date or empty string>",
@@ -575,12 +579,18 @@ When the user wants to reach out to leads: if they give a specific URL set url, 
                     try {
                         const raw = await CallLLM(buildAgentPrompt(ag), '.', 1200);
                         let parsed = { confidence: 0, ready: false, response: '', missing_key: '', missing_description: '', question_for_orchestrator: '', intent_understood: message, action: 'provide_info', action_data: {}, transfer_to: null };
-                        try { parsed = JSON.parse(raw.replace(/```json|```/g, '').trim()); }
-                        catch (e) { if (raw.trim().length > 20) parsed = { ...parsed, confidence: 5, ready: true, response: raw.trim() }; }
+                        try {
+                            // Extract the first {...} JSON object from the raw output robustly
+                            const jsonMatch = raw.match(/\{[\s\S]*\}/);
+                            parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw.replace(/```json|```/g, '').trim());
+                        } catch (e) {
+                            console.warn(`[${ag.name}] JSON parse failed, treating raw as plain response`);
+                            if (raw.trim().length > 20) parsed = { ...parsed, confidence: 5, ready: true, response: raw.trim() };
+                        }
                         // Continuity bonus: active agent gets a small boost on first iteration
                         if (iteration === 0 && ag.name === activeAgent)
                             parsed.confidence = Math.min(10, (parsed.confidence || 0) + CONTINUITY_BONUS);
-                        console.log(`  [${ag.name}] confidence=${parsed.confidence} ready=${parsed.ready}`);
+                        console.log(`  [${ag.name}] confidence=${parsed.confidence} ready=${parsed.ready} action=${parsed.action} email=${parsed.action_data?.email || 'none'}`);
                         return { agent: ag, result: parsed };
                     } catch (e) {
                         console.error(`[${ag.name}] call failed:`, e.message);
@@ -620,7 +630,8 @@ Return ONLY valid JSON — no extra text:
 
                 try {
                     const judgeRaw = await CallLLM(judgePrompt, '.', 150);
-                    const judgeResult = JSON.parse(judgeRaw.replace(/```json|```/g, '').trim());
+                    const judgeJsonMatch = judgeRaw.match(/\{[\s\S]*\}/);
+                    const judgeResult = JSON.parse(judgeJsonMatch ? judgeJsonMatch[0] : judgeRaw.replace(/```json|```/g, '').trim());
                     const judgeWinner = parallelResults.find(r =>
                         r.agent.name.toLowerCase() === judgeResult.chosen_agent?.toLowerCase()
                     );
@@ -637,7 +648,7 @@ Return ONLY valid JSON — no extra text:
 
             selectedAgent = winner.agent;
             const agentCheck = winner.result;
-            console.log(`[FanOut] Winner: "${selectedAgent.name}" (confidence=${agentCheck.confidence})`);
+            console.log(`[FanOut] Winner: "${selectedAgent.name}" (confidence=${agentCheck.confidence}) action=${agentCheck.action} email=${agentCheck.action_data?.email || 'none'}`);
 
             // ── Transfer ──────────────────────────────────────────────────────
             if (agentCheck.transfer_to) {
@@ -665,8 +676,8 @@ Return ONLY valid JSON — no extra text:
             }
 
             // ── Winner is ready → return ──────────────────────────────────────
-            if (agentCheck.ready && agentCheck.response) {   
-                await db.saveChatMessage({ id: uuid.v4(), groupId, userMessage: message, response: agentCheck.response, agentName: selectedAgent.name, agentRole: selectedAgent.role });   
+            if (agentCheck.ready && agentCheck.response) {
+                await db.saveChatMessage({ id: uuid.v4(), groupId, userMessage: message, response: agentCheck.response, agentName: selectedAgent.name, agentRole: selectedAgent.role });
                 if (agentCheck.action  === 'send_quotation' && agentCheck.action_data?.email) {
                     try {
                         await sendQuotationEmail({
@@ -694,6 +705,8 @@ Return ONLY valid JSON — no extra text:
                         iterations      : iteration + 1,
                     });
                 }
+
+                
 
                 if (agentCheck.action === 'send_lead_emails' && (agentCheck.action_data?.url || agentCheck.action_data?.query)) {
                     // Respond immediately — run email job in background
@@ -768,7 +781,7 @@ Return ONLY valid JSON — no extra text:
                             '.', 150
                         );
                         let ragCheck = { found: false, value: '' };
-                        try { ragCheck = JSON.parse(ragCheckRaw.replace(/```json|```/g, '').trim()); } catch(e) {}
+                        try { const ragJsonMatch = ragCheckRaw.match(/\{[\s\S]*\}/); ragCheck = JSON.parse(ragJsonMatch ? ragJsonMatch[0] : ragCheckRaw.replace(/```json|```/g, '').trim()); } catch(e) {}
                         if (ragCheck.found && ragCheck.value) {
                             ragAnswer = ragCheck.value;
                             console.log(`[FanOut] Found in RAG: "${agentCheck.missing_key}" = "${ragAnswer}"`);
