@@ -163,26 +163,28 @@ export default function MultiAgentChatPage() {
             setRoutingTo(null);
             if (!res.ok) throw new Error((data.error as string) || 'Server error');
 
-            if (data.status === 'needs_input') {
-                setPendingContext(data.pendingContext);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const d = data as any;
+            if (d.status === 'needs_input') {
+                setPendingContext(d.pendingContext);
                 setMessages(prev => [...prev, {
                     role: 'agent',
-                    content: data.question,
-                    agentName: data.agent?.name,
-                    agentRole: data.agent?.role,
+                    content: d.question,
+                    agentName: d.agent?.name,
+                    agentRole: d.agent?.role,
                     isClarifying: true,
                 }]);
             } else {
                 setPendingContext(null);
-                const isMetaAgent = data.agent?.name?.toLowerCase().includes('meta');
+                const isMetaAgent = d.agent?.name?.toLowerCase().includes('meta');
                 setMessages(prev => [...prev, {
                     role: 'agent',
-                    content: isMetaAgent ? '✓ Done — your update has been applied.' : data.response,
-                    agentName: data.agent?.name,
-                    agentRole: data.agent?.role,
-                    intentUnderstood: isMetaAgent ? undefined : data.intent_understood,
-                    action: isMetaAgent ? undefined : data.action,
-                    leadResults: data.lead_results?.length ? data.lead_results : undefined,
+                    content: isMetaAgent ? '✓ Done — your update has been applied.' : d.response,
+                    agentName: d.agent?.name,
+                    agentRole: d.agent?.role,
+                    intentUnderstood: isMetaAgent ? undefined : d.intent_understood,
+                    action: isMetaAgent ? undefined : d.action,
+                    leadResults: d.lead_results?.length ? d.lead_results : undefined,
                 }]);
             }
         } catch (err: unknown) {
