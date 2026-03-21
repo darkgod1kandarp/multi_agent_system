@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -57,7 +58,11 @@ function buildQuotationHTML({ customerName, companyName, agentName, items, total
 }
 
 async function generatePDF(html) {
-    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const browser = await puppeteer.launch({
+        args: chromium.args,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+    });
     try {
         const page = await browser.newPage();
         await page.setContent(`<!DOCTYPE html><html><body>${html}</body></html>`, { waitUntil: 'networkidle0' });
