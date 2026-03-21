@@ -153,10 +153,15 @@ export default function MultiAgentChatPage() {
                     pendingContext,
                 }),
             });
-            const data = await res.json();
+            let data: Record<string, unknown>;
+            try {
+                data = await res.json();
+            } catch {
+                throw new Error('Backend is not responding correctly. Please try again in a moment.');
+            }
 
             setRoutingTo(null);
-            if (!res.ok) throw new Error(data.error || 'Server error');
+            if (!res.ok) throw new Error((data.error as string) || 'Server error');
 
             if (data.status === 'needs_input') {
                 setPendingContext(data.pendingContext);
