@@ -174,7 +174,14 @@ app.get("/agent-groups", async (req, res) => {
         const groups = await db.getAllAgentGroups();
         const result = await Promise.all(groups.map(async (group) => {
             const agents = await db.getAgentsByGroup(group.id);
-            return { ...group, agents: agents || [] };
+            // Deduplicate by agent name (keep first occurrence)
+            const seen = new Set();
+            const unique = (agents || []).filter(a => {
+                if (seen.has(a.name)) return false;
+                seen.add(a.name);
+                return true;
+            });
+            return { ...group, agents: unique };
         }));
         res.json({ groups: result });
     } catch (e) {
