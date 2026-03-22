@@ -75,6 +75,9 @@ export default function MultiAgentChatPage() {
     const [pendingContext, setPendingContext] = useState<PendingContext | null>(null);
     const [inputFocused, setInputFocused] = useState(false);
     const [toasts, setToasts] = useState<AppNotification[]>([]);
+    const [historyOpen, setHistoryOpen] = useState(false);
+    const [historyMessages, setHistoryMessages] = useState<ChatMessage[]>([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -125,6 +128,24 @@ export default function MultiAgentChatPage() {
     const agentColor = (name: string) => {
         const idx = agents.findIndex(a => a.name === name);
         return AGENT_COLORS[(idx >= 0 ? idx : 0) % AGENT_COLORS.length];
+    };
+
+    const openHistory = async () => {
+        setHistoryOpen(true);
+        if (!groupId) return;
+        setHistoryLoading(true);
+        try {
+            const res = await fetch(`${BACKEND_URL}/chat/history?groupId=${groupId}&limit=100`);
+            const data = await res.json();
+            const converted: ChatMessage[] = [];
+            for (const row of (data.history || []).reverse()) {
+                if (row.user_message) converted.push({ role: 'user', content: row.user_message });
+                if (row.response) converted.push({ role: 'agent', content: row.response, agentName: row.agent_name, agentRole: row.agent_role });
+            }
+            setHistoryMessages(converted);
+        } catch { /* ignore */ } finally {
+            setHistoryLoading(false);
+        }
     };
 
     const handleSend = async () => {
@@ -289,6 +310,24 @@ export default function MultiAgentChatPage() {
                     {agents.length > 3 && (
                         <div style={{ fontSize: '11px', color: 'rgba(180,205,225,0.3)' }}>+{agents.length - 3} more</div>
                     )}
+                    <button
+                        onClick={openHistory}
+                        style={{
+                            display: 'flex', alignItems: 'center', gap: '6px',
+                            background: 'rgba(73,182,132,0.06)',
+                            border: '1px solid rgba(73,182,132,0.18)',
+                            borderRadius: '8px',
+                            padding: '6px 12px',
+                            color: 'rgba(180,205,225,0.6)',
+                            fontSize: '12px', fontWeight: 500,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                        }}
+                    >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/>
+                        </svg>
+                        History
+                    </button>
                     <button
                         onClick={() => router.push('/')}
                         style={{
@@ -569,10 +608,103 @@ export default function MultiAgentChatPage() {
                         </div>
                     )}
 
-                    <style>{`@keyframes bounce { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} } @keyframes slideIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }`}</style>
+                    <style>{`@keyframes bounce { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} } @keyframes slideIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } } @keyframes slideInLeft { from { opacity:0; transform:translateX(-100%); } to { opacity:1; transform:translateX(0); } }`}</style>
                     <div ref={bottomRef} />
                 </div>
             </div>
+
+            {/* ── History sidebar ── */}
+            {historyOpen && (
+                <div style={{
+                    position: 'fixed', inset: 0, zIndex: 900,
+                    display: 'flex',
+                }}>
+                    {/* Backdrop */}
+                    <div
+                        onClick={() => setHistoryOpen(false)}
+                        style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }}
+                    />
+                    {/* Panel */}
+                    <div style={{
+                        position: 'relative', zIndex: 1,
+                        width: '360px', maxWidth: '90vw',
+                        background: '#0D2D4B',
+                        borderRight: '1px solid rgba(73,182,132,0.15)',
+                        display: 'flex', flexDirection: 'column',
+                        animation: 'slideInLeft 0.22s ease',
+                    }}>
+                        {/* Header */}
+                        <div style={{
+                            padding: '16px 20px',
+                            borderBottom: '1px solid rgba(73,182,132,0.12)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        }}>
+                            <span style={{ fontSize: '13px', fontWeight: 700, color: '#EDF2F7', letterSpacing: '0.3px' }}>
+                                Previous Chats
+                            </span>
+                            <button onClick={() => setHistoryOpen(false)} style={{
+                                background: 'none', border: 'none', color: 'rgba(180,205,225,0.4)',
+                                cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: 0,
+                            }}>✕</button>
+                        </div>
+                        {/* Messages */}
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            {historyLoading && (
+                                <div style={{ color: 'rgba(180,205,225,0.4)', fontSize: '13px', textAlign: 'center', marginTop: '40px' }}>
+                                    Loading…
+                                </div>
+                            )}
+                            {!historyLoading && historyMessages.length === 0 && (
+                                <div style={{ color: 'rgba(180,205,225,0.35)', fontSize: '13px', textAlign: 'center', marginTop: '40px' }}>
+                                    No previous chats found.
+                                </div>
+                            )}
+                            {historyMessages.map((msg, i) => (
+                                <div key={i} style={{
+                                    display: 'flex',
+                                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                                }}>
+                                    <div style={{
+                                        maxWidth: '85%',
+                                        padding: '9px 13px',
+                                        borderRadius: msg.role === 'user' ? '14px 14px 3px 14px' : '3px 14px 14px 14px',
+                                        background: msg.role === 'user' ? '#49B684' : 'rgba(255,255,255,0.05)',
+                                        border: msg.role === 'user' ? 'none' : '1px solid rgba(73,182,132,0.1)',
+                                        fontSize: '13px', lineHeight: '1.55', color: '#EDF2F7',
+                                        wordBreak: 'break-word', whiteSpace: 'pre-wrap',
+                                    }}>
+                                        {msg.role === 'agent' && msg.agentName && (
+                                            <div style={{
+                                                fontSize: '10px', fontWeight: 700, letterSpacing: '0.6px',
+                                                textTransform: 'uppercase', color: '#49B684',
+                                                marginBottom: '4px',
+                                            }}>
+                                                {msg.agentName}
+                                            </div>
+                                        )}
+                                        {msg.content}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        {/* Load into current chat */}
+                        {historyMessages.length > 0 && (
+                            <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(73,182,132,0.1)' }}>
+                                <button
+                                    onClick={() => { setMessages(historyMessages); setHistoryOpen(false); }}
+                                    style={{
+                                        width: '100%', padding: '10px', borderRadius: '10px',
+                                        background: '#49B684', border: 'none', color: '#fff',
+                                        fontSize: '13px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                                    }}
+                                >
+                                    Load into Chat
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* ── Toast notifications ── */}
             <div style={{
