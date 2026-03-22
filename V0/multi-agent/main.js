@@ -3,6 +3,7 @@ const { runFireCrawl } = require('./component/firecrawl');
 const { GenerateEmbedding, CreateCollection, CollectionExists, InsertBulkIntoQdrant, SearchQdrant} = require('./component/qdrant_db');
 const { sendQuotationEmail } = require('./component/mailer');
 const { sendLeadEmails } = require('./component/lead-mailer');
+const { makeCall, bulkCallLeads } = require('./component/caller');
 const dotenv = require('dotenv');
 const uuid = require('uuid');
 const { llm } = require('./component/llm');
@@ -551,8 +552,10 @@ ${firstGreet ? '0. Start with warm greeting and self-introduction.' : ''}
 5. If out-of-scope, set confidence ≤ 3 and set transfer_to to the correct agent.
 6. ACTION RULES — read carefully before choosing action:
    - Use "send_quotation" when the user EXPLICITLY asks to send/email/mail a quote or proposal — examples: "send the quotation", "email this to him", "send it to john@example.com", "mail the quote", "quote bhejo", "send kar do", "email bhej do". If an email address appears anywhere in the user's message or in Collected context, extract it into action_data.email and set action "send_quotation". If no email address is available, set ready: false and ask for it — do NOT silently fall back to "provide_info".
-   - Use "send_lead_emails" when the user wants to reach out to a list of external businesses/leads.
-   - Use "provide_info" ONLY when the user is asking a question or wants information — NOT when they are asking you to send something.
+   - Use "send_lead_emails" when the user wants to reach out to a list of external businesses/leads via email.
+   - Use "make_call" when the user wants to call ONE specific customer — examples: "call John", "call him", "dial this number", "call karo", "phone kar do". Required fields: customer_number (10-digit phone), call_name, customer_country_code. NEVER assume or guess the country code — if the user has not explicitly stated it, set ready: false and ask "What is the customer's country code? (e.g. 91 for India, 1 for USA)". Do NOT proceed without all three fields confirmed by the user.
+   - Use "bulk_call" when the user wants to call MULTIPLE potential customers found by crawling a website or Google search — examples: "call all leads", "call crane companies in Mumbai", "dial everyone from that site". Required: query or url.
+   - Use "provide_info" ONLY when the user is asking a question or wants information — NOT when they are asking you to call or send something.
 
 Return ONLY valid JSON:
 {
@@ -564,7 +567,7 @@ Return ONLY valid JSON:
   "missing_description": "<if ready=false: plain English>",
   "question_for_orchestrator": "<if ready=false: question in English>",
   "intent_understood": "<one sentence in English>",
-  "action": null | "schedule" | "collect_info" | "follow_up" | "provide_info" | "send_quotation" | "send_lead_emails",
+  "action": null | "schedule" | "collect_info" | "follow_up" | "provide_info" | "send_quotation" | "send_lead_emails" | "make_call" | "bulk_call",
   "action_data": {
     "email": "<REQUIRED for send_quotation — extract from user message or Collected context>",
     "customer_name": "<customer name, for send_quotation>",
@@ -575,11 +578,16 @@ Return ONLY valid JSON:
     "query": "<Google search query to find target companies/leads, only for send_lead_emails — use this when user describes a type of business or location instead of a specific URL>",
     "url": "<specific website URL, only for send_lead_emails — use this only when the user provides an exact URL>",
     "intent": "<what to communicate in the outreach email, only for send_lead_emails>",
-    "subject": "<email subject line, only for send_lead_emails>"
+    "subject": "<email subject line, only for send_lead_emails>",
+    "customer_number": "<phone number digits only, REQUIRED for make_call>",
+    "call_name": "<customer name to address in the call, REQUIRED for make_call>",
+    "customer_country_code": "<country code digits only, e.g. 91 for India — default 91 if not specified>"
   }
 }
 
-When the user wants to reach out to leads: if they give a specific URL set url, if they describe a business type or location set query (e.g. "crane companies in Mumbai" → query: "crane rental companies Mumbai contact email"). Always set action to "send_lead_emails".`;
+When user wants to call ONE person: set action "make_call", fill customer_number and call_name.
+When user wants to call MULTIPLE leads via search/URL: set action "bulk_call", fill query or url and intent.
+When the user wants to reach out to leads via email: if they give a specific URL set url, if they describe a business type or location set query (e.g. "crane companies in Mumbai" → query: "crane rental companies Mumbai contact email"). Always set action to "send_lead_emails".`;
         };
 
         // ── 8. Fan-out loop ───────────────────────────────────────────────────
@@ -772,6 +780,89 @@ Return ONLY valid JSON — no extra text:
                             timestamp : Date.now(),
                         });
                         console.error('[LeadMailer] Background job failed:', e.message);
+                    });
+                    return;
+                }
+
+                // ── make_call: single customer call ───────────────────────────
+                if (agentCheck.action === 'make_call' && agentCheck.action_data?.customer_number && agentCheck.action_data?.call_name) {
+                    try {
+                        const callResult = await makeCall({
+                            customerNumber      : agentCheck.action_data.customer_number,
+                            assignedNumber      : process.env.VOMYRA_ASSIGNED_NUMBER,
+                            name                : agentCheck.action_data.call_name,
+                            customerCountryCode : agentCheck.action_data.customer_country_code,
+                        });
+                        const note = callResult.success
+                            ? `\n\n(Call initiated to ${agentCheck.action_data.customer_number} ✓)`
+                            : `\n\n(Call failed: ${callResult.message})`;
+                        return res.json({
+                            status           : 'complete',
+                            response         : agentCheck.response + note,
+                            intent_understood: agentCheck.intent_understood || message,
+                            action           : 'make_call',
+                            action_data      : agentCheck.action_data || {},
+                            agent            : { name: selectedAgent.name, role: selectedAgent.role },
+                            intent           : message,
+                            iterations       : iteration + 1,
+                        });
+                    } catch (e) {
+                        console.error('[Caller] make_call failed:', e.message);
+                        return res.json({
+                            status           : 'complete',
+                            response         : agentCheck.response + `\n\n(Call could not be initiated: ${e.response?.data?.message || e.message})`,
+                            intent_understood: agentCheck.intent_understood || message,
+                            action           : 'make_call',
+                            action_data      : agentCheck.action_data || {},
+                            agent            : { name: selectedAgent.name, role: selectedAgent.role },
+                            intent           : message,
+                            iterations       : iteration + 1,
+                        });
+                    }
+                }
+
+                // ── bulk_call: crawl → extract phones → call all ──────────────
+                if (agentCheck.action === 'bulk_call' && (agentCheck.action_data?.query || agentCheck.action_data?.url)) {
+                    res.json({
+                        status           : 'complete',
+                        response         : agentCheck.response + '\n\n(Searching for leads and initiating calls in the background — I\'ll notify you with results!)',
+                        intent_understood: agentCheck.intent_understood || message,
+                        action           : 'bulk_call',
+                        action_data      : agentCheck.action_data || {},
+                        agent            : { name: selectedAgent.name, role: selectedAgent.role },
+                        intent           : message,
+                        iterations       : iteration + 1,
+                    });
+
+                    bulkCallLeads({
+                        query          : agentCheck.action_data.query || '',
+                        url            : agentCheck.action_data.url   || '',
+                        assignedNumber : process.env.VOMYRA_ASSIGNED_NUMBER,
+                        intent         : agentCheck.action_data.intent || message,
+                        agentName      : selectedAgent.name,
+                        companyName    : companyName || 'Our Company',
+                    }).then(result => {
+                        if (!notifications[groupId]) notifications[groupId] = [];
+                        notifications[groupId].push({
+                            id        : uuid.v4(),
+                            type      : 'bulk_call_done',
+                            title     : 'Bulk Call Complete',
+                            body      : result.message,
+                            data      : { sent: result.calls },
+                            timestamp : Date.now(),
+                        });
+                        console.log(`[Caller] Bulk call done for group ${groupId}: ${result.message}`);
+                    }).catch(e => {
+                        if (!notifications[groupId]) notifications[groupId] = [];
+                        notifications[groupId].push({
+                            id        : uuid.v4(),
+                            type      : 'bulk_call_failed',
+                            title     : 'Bulk Call Failed',
+                            body      : e.message,
+                            data      : { sent: [] },
+                            timestamp : Date.now(),
+                        });
+                        console.error('[Caller] Bulk call failed:', e.message);
                     });
                     return;
                 }

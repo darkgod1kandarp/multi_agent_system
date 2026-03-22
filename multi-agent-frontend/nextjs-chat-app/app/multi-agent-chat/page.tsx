@@ -86,7 +86,14 @@ export default function MultiAgentChatPage() {
         if (stored) {
             try {
                 const parsed: Agent[] = JSON.parse(stored);
-                setAgents(parsed);
+                // Deduplicate by name
+                const seen = new Set<string>();
+                const unique = parsed.filter(a => {
+                    if (seen.has(a.name)) return false;
+                    seen.add(a.name);
+                    return true;
+                });
+                setAgents(unique);
             } catch { /* ignore */ }
         }
         const id = localStorage.getItem('agentGroupId');
@@ -109,13 +116,21 @@ export default function MultiAgentChatPage() {
                     // Also append lead results as a chat message
                     data.notifications.forEach((n: AppNotification) => {
                         if (n.data?.sent?.length) {
+                            const isBulkCall = n.type === 'bulk_call_done' || n.type === 'bulk_call_failed';
+                            // Normalise call results so the lead card renders correctly
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const results: LeadResult[] = n.data.sent.map((r: any) =>
+                                isBulkCall
+                                    ? { email: r.phone, name: r.name, company: r.company, status: (r.status === 'called' ? 'sent' : 'failed') as 'sent' | 'failed', error: r.error }
+                                    : r as LeadResult
+                            );
                             setMessages(prev => [...prev, {
                                 role: 'agent',
                                 content: n.body,
                                 agentName: 'System',
-                                agentRole: 'Notification',
-                                action: 'send_lead_emails',
-                                leadResults: n.data.sent,
+                                agentRole: isBulkCall ? 'Voice Calls' : 'Email Outreach',
+                                action: isBulkCall ? 'bulk_call' : 'send_lead_emails',
+                                leadResults: results,
                             }]);
                         }
                     });
@@ -516,10 +531,16 @@ export default function MultiAgentChatPage() {
                                                 textTransform: 'uppercase', color: '#49B684',
                                                 display: 'flex', alignItems: 'center', gap: '6px',
                                             }}>
-                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
-                                                </svg>
-                                                Lead Outreach — {msg.leadResults.filter(r => r.status === 'sent').length} of {msg.leadResults.length} sent
+                                                {msg.action === 'bulk_call' ? (
+                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 10.8 19.79 19.79 0 01.22 2.18 2 2 0 012.18 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 7.91a16 16 0 006.72 6.72l1.28-.52a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/>
+                                                    </svg>
+                                                ) : (
+                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+                                                    </svg>
+                                                )}
+                                                {msg.action === 'bulk_call' ? 'Calls' : 'Lead Outreach'} — {msg.leadResults.filter(r => r.status === 'sent').length} of {msg.leadResults.length} {msg.action === 'bulk_call' ? 'called' : 'sent'}
                                             </div>
                                             {msg.leadResults.map((lead, li) => (
                                                 <div key={li} style={{
