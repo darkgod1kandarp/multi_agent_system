@@ -169,6 +169,19 @@ app.get("/agents/finalized", async (req, res) => {
     res.json({ agents: await db.getAllFinalizedAgents() });
 });
 
+app.get("/agent-groups", async (req, res) => {
+    try {
+        const groups = await db.getAllAgentGroups();
+        const result = await Promise.all(groups.map(async (group) => {
+            const agents = await db.getAgentsByGroup(group.id);
+            return { ...group, agents: agents || [] };
+        }));
+        res.json({ groups: result });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 const extractURFromText = (text) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
     const urls = text.match(urlRegex);

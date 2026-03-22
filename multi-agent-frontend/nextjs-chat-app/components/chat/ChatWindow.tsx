@@ -39,7 +39,28 @@ const ChatWindow = () => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(false);
     const [loadingMode, setLoadingMode] = useState<'chat' | 'agent'>('chat');
+    const [buildsOpen, setBuildsOpen] = useState(false);
+    const [builds, setBuilds] = useState<{ id: string; company_name: string; source_url: string; created_at: string; agents: Agent[] }[]>([]);
+    const [buildsLoading, setBuildsLoading] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
+
+    const openBuilds = async () => {
+        setBuildsOpen(true);
+        setBuildsLoading(true);
+        try {
+            const res = await fetch(`${BACKEND_URL}/agent-groups`);
+            const data = await res.json();
+            setBuilds(data.groups || []);
+        } catch { /* ignore */ } finally {
+            setBuildsLoading(false);
+        }
+    };
+
+    const loadBuild = (build: { id: string; company_name: string; agents: Agent[] }) => {
+        localStorage.setItem('agentGroupId', build.id);
+        sessionStorage.setItem('finalizedAgents', JSON.stringify(build.agents));
+        window.location.href = '/multi-agent-chat';
+    };
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -341,6 +362,19 @@ const ChatWindow = () => {
                     <span style={{ fontSize: '11px', color: 'rgba(73,182,132,0.5)' }}>
                         {isMaster ? '🔗 Paste URL to build agents' : '💬 Chat with Myra'}
                     </span>
+                    <button onClick={openBuilds} style={{
+                        display: 'flex', alignItems: 'center', gap: '5px',
+                        background: 'rgba(73,182,132,0.06)',
+                        border: '1px solid rgba(73,182,132,0.2)',
+                        borderRadius: '7px', padding: '4px 10px',
+                        color: 'rgba(180,205,225,0.6)', fontSize: '11px',
+                        fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                    }}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/>
+                        </svg>
+                        History
+                    </button>
                 </div>
             </div>
 
@@ -431,6 +465,91 @@ const ChatWindow = () => {
 
             {/* Input */}
             <ChatInput onSend={handleSend} disabled={loading} />
+
+            {/* ── History sidebar ── */}
+            {buildsOpen && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 900, display: 'flex' }}>
+                    <div onClick={() => setBuildsOpen(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)' }} />
+                    <div style={{
+                        position: 'relative', zIndex: 1,
+                        width: '380px', maxWidth: '92vw',
+                        background: '#0D2D4B',
+                        borderRight: '1px solid rgba(73,182,132,0.15)',
+                        display: 'flex', flexDirection: 'column',
+                        animation: 'slideInLeft 0.22s ease',
+                    }}>
+                        {/* Header */}
+                        <div style={{ padding: '18px 20px', borderBottom: '1px solid rgba(73,182,132,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div>
+                                <div style={{ fontSize: '14px', fontWeight: 700, color: '#EDF2F7' }}>Previous Agent Builds</div>
+                                <div style={{ fontSize: '11px', color: 'rgba(180,205,225,0.4)', marginTop: '2px' }}>Click a build to open it in chat</div>
+                            </div>
+                            <button onClick={() => setBuildsOpen(false)} style={{ background: 'none', border: 'none', color: 'rgba(180,205,225,0.4)', cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: 0 }}>✕</button>
+                        </div>
+
+                        {/* List */}
+                        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                            {buildsLoading && <div style={{ color: 'rgba(180,205,225,0.4)', fontSize: '13px', textAlign: 'center', marginTop: '40px' }}>Loading…</div>}
+                            {!buildsLoading && builds.length === 0 && <div style={{ color: 'rgba(180,205,225,0.35)', fontSize: '13px', textAlign: 'center', marginTop: '40px' }}>No previous builds found.</div>}
+                            {builds.map((build) => (
+                                <div key={build.id} style={{
+                                    background: 'rgba(255,255,255,0.03)',
+                                    border: '1px solid rgba(73,182,132,0.12)',
+                                    borderRadius: '12px',
+                                    padding: '14px 16px',
+                                    display: 'flex', flexDirection: 'column', gap: '8px',
+                                    cursor: 'pointer',
+                                    transition: 'border-color 0.15s, background 0.15s',
+                                }}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(73,182,132,0.4)'; (e.currentTarget as HTMLDivElement).style.background = 'rgba(73,182,132,0.05)'; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(73,182,132,0.12)'; (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.03)'; }}
+                                >
+                                    {/* Company + date */}
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#EDF2F7' }}>
+                                            {build.company_name || 'Unnamed Build'}
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: 'rgba(180,205,225,0.35)' }}>
+                                            {build.created_at ? new Date(build.created_at).toLocaleDateString() : ''}
+                                        </div>
+                                    </div>
+
+                                    {/* Source URL */}
+                                    {build.source_url && (
+                                        <div style={{ fontSize: '11px', color: 'rgba(73,182,132,0.6)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                            {build.source_url}
+                                        </div>
+                                    )}
+
+                                    {/* Agent pills */}
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                                        {(build.agents || []).map((a, i) => (
+                                            <span key={i} style={{
+                                                padding: '2px 9px', borderRadius: '999px', fontSize: '10px', fontWeight: 600,
+                                                background: 'rgba(73,182,132,0.1)', color: '#49B684',
+                                                border: '1px solid rgba(73,182,132,0.25)',
+                                            }}>{a.name}</span>
+                                        ))}
+                                    </div>
+
+                                    {/* Load button */}
+                                    <button
+                                        onClick={() => loadBuild(build)}
+                                        style={{
+                                            marginTop: '4px', padding: '8px', borderRadius: '8px',
+                                            background: '#49B684', border: 'none', color: '#fff',
+                                            fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                                        }}
+                                    >
+                                        Open in Chat →
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <style>{`@keyframes slideInLeft { from { opacity:0; transform:translateX(-100%); } to { opacity:1; transform:translateX(0); } }`}</style>
+                </div>
+            )}
         </div>
     );
 };
